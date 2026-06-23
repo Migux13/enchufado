@@ -22,7 +22,6 @@ from homeassistant.util.unit_conversion import EnergyConverter
 from .const import (
     BILLING_PERIODS_FILE,
     CONF_AUTHORIZED_NIF,
-    CONF_BILLS_NUMBER,
     CONF_CUPS,
     CONF_DATADIS_PASSWORD,
     CONF_DATADIS_USER,
@@ -30,7 +29,6 @@ from .const import (
     CONF_POINT_TYPE,
     CONF_POWER_HIGH,
     CONF_POWER_LOW,
-    CONF_ZIP_CODE,
     CONSUMPTION_STATISTIC_ID,
     CONSUMPTION_STATISTIC_NAME,
     COST_STATISTIC_ID,
@@ -53,8 +51,6 @@ class EnchufadoCoordinator:
     authorized_nif = None
     power_high = None
     power_low = None
-    zip_code = None
-    bills_number = None
 
     consumption_metadata = StatisticMetaData(
         name=CONSUMPTION_STATISTIC_NAME,
@@ -84,8 +80,6 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.authorized_nif = config.get(CONF_AUTHORIZED_NIF)
         EnchufadoCoordinator.power_high = config.get(CONF_POWER_HIGH, 4.6)
         EnchufadoCoordinator.power_low = config.get(CONF_POWER_LOW, 4.6)
-        EnchufadoCoordinator.zip_code = config.get(CONF_ZIP_CODE, "")
-        EnchufadoCoordinator.bills_number = config.get(CONF_BILLS_NUMBER, 5)
 
         Datadis.setup(
             username=config[CONF_DATADIS_USER],

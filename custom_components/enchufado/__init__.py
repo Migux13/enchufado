@@ -5,12 +5,15 @@ from os import makedirs
 from os.path import exists
 from random import randint
 
+from homeassistant.const import Platform
 from homeassistant.helpers.event import async_track_time_change
 
 from .const import DOMAIN, USER_FILES_PATH
 from .coordinator import EnchufadoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+PLATFORMS = [Platform.NUMBER]
 
 
 async def async_setup_entry(hass, entry) -> bool:
@@ -22,7 +25,9 @@ async def async_setup_entry(hass, entry) -> bool:
 
     unsub = entry.add_update_listener(options_update_listener)
     hass_data["unsub_options_update_listener"] = unsub
-    hass.data[DOMAIN][entry.entry_id] = hass_data
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = hass_data
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     await hass.async_add_executor_job(_setup_services, hass)
     hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
@@ -59,9 +64,11 @@ async def options_update_listener(hass, config_entry):
 
 
 async def async_unload_entry(hass, entry) -> bool:
-    entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-    entry_data["unsub_options_update_listener"]()
-    return True
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
+        entry_data["unsub_options_update_listener"]()
+    return unloaded
 
 
 def setup(hass, config):

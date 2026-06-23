@@ -2,23 +2,28 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configurar Enchufado",
-        "description": "Introduce tus credenciales de Datadis y los datos de tu suministro.",
+        "title": "Credenciales Datadis",
+        "description": "Introduce tus credenciales de [datadis.es](https://datadis.es).",
         "data": {
-          "datadis_user": "Usuario Datadis (NIF/NIE)",
-          "datadis_password": "Contraseña Datadis",
-          "cups": "CUPS",
-          "authorized_nif": "NIF autorizado (opcional)",
-          "power_high": "Potencia contratada P1/P2 (kW)",
-          "power_low": "Potencia contratada P3 (kW)",
-          "zip_code": "Código postal (opcional)",
-          "bills_number": "Número de facturas a mostrar"
+          "datadis_user": "Usuario (NIF/NIE)",
+          "datadis_password": "Contraseña",
+          "authorized_nif": "NIF autorizado (opcional, si el CUPS está a nombre de otra persona)"
+        }
+      },
+      "cups": {
+        "title": "Selecciona tu suministro",
+        "description": "Se han encontrado los siguientes puntos de suministro en tu cuenta.",
+        "data": {
+          "cups": "CUPS"
         }
       }
     },
     "error": {
-      "cannot_connect": "No se pudo conectar a Datadis. Verifica tus credenciales.",
-      "unknown": "Error desconocido."
+      "cannot_connect": "No se pudo conectar a Datadis. Verifica usuario y contraseña.",
+      "no_supplies": "No se encontraron suministros para esta cuenta."
+    },
+    "abort": {
+      "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros."
     }
   }
 }
