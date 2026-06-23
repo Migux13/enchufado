@@ -53,9 +53,9 @@ def _setup_services(hass) -> None:
         await asyncio.sleep(randint(0, 3600))
         hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
 
-    hass.services.register(DOMAIN, "import_energy_data", _handle_import)
-    hass.services.register(DOMAIN, "force_import_energy_data", _handle_force_import)
-    hass.services.register(DOMAIN, "reprocess_energy_data", _handle_reprocess)
+    hass.services.async_register(DOMAIN, "import_energy_data", _handle_import)
+    hass.services.async_register(DOMAIN, "force_import_energy_data", _handle_force_import)
+    hass.services.async_register(DOMAIN, "reprocess_energy_data", _handle_reprocess)
     async_track_time_change(hass, _handle_scheduled_import, hour=6, minute=30, second=0)
 
 
