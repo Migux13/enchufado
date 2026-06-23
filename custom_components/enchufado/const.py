@@ -17,6 +17,8 @@ CONSUMPTION_STATISTIC_ID = f"{DOMAIN}:consumption"
 CONSUMPTION_STATISTIC_NAME = "Consumo eléctrico PVPC"
 COST_STATISTIC_ID = f"{DOMAIN}:cost"
 COST_STATISTIC_NAME = "Coste eléctrico PVPC"
+BILL_STATISTIC_ID = f"{DOMAIN}:bill"
+BILL_STATISTIC_NAME = "Factura eléctrica simulada"
 CURRENT_BILL_STATE = f"{DOMAIN}.current_bill"
 
 # Data file paths (inside HA config dir)

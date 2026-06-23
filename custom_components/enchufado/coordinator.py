@@ -24,6 +24,8 @@ from homeassistant.helpers import entity_registry as er
 from .cnmc import calculate_bill
 from .const import (
     BILLING_PERIODS_FILE,
+    BILL_STATISTIC_ID,
+    BILL_STATISTIC_NAME,
     CONF_AUTHORIZED_NIF,
     CONF_CUPS,
     CONF_DATADIS_PASSWORD,
@@ -73,6 +75,15 @@ class EnchufadoCoordinator:
         has_sum=True,
         source=DOMAIN,
         statistic_id=COST_STATISTIC_ID,
+        unit_of_measurement=CURRENCY_EURO,
+    )
+    bill_metadata = StatisticMetaData(
+        name=BILL_STATISTIC_NAME,
+        mean_type=StatisticMeanType.NONE,
+        unit_class=None,
+        has_sum=True,
+        source=DOMAIN,
+        statistic_id=BILL_STATISTIC_ID,
         unit_of_measurement=CURRENCY_EURO,
     )
 
@@ -534,3 +545,25 @@ class EnchufadoCoordinator:
             },
         )
         _LOGGER.info("calculate_bills: published %d bills, latest=%.2f €", len(calculated), total_cost if isinstance(total_cost, (int, float)) else 0)
+
+        # Insert enchufado:bill as an external statistic (one point per period)
+        bill_stats = []
+        cumulative = 0.0
+        for p in billing_periods:
+            tc = p.get("total_cost")
+            if not isinstance(tc, (int, float)):
+                continue
+            cumulative += tc
+            start = datetime.datetime(
+                p["start_date"].year, p["start_date"].month, p["start_date"].day,
+                tzinfo=datetime.UTC,
+            )
+            bill_stats.append(StatisticData(start=start, state=tc, sum=cumulative))
+
+        if bill_stats:
+            get_instance(hass).async_add_executor_job(
+                async_add_external_statistics,
+                hass,
+                EnchufadoCoordinator.bill_metadata,
+                bill_stats,
+            )
