@@ -1,0 +1,11 @@
+import_energy_data:
+  name: Importar datos de energía
+  description: Importa los datos de consumo y precios desde Datadis y ESIOS.
+
+force_import_energy_data:
+  name: Forzar importación de datos
+  description: Fuerza la importación ignorando la caché local.
+
+reprocess_energy_data:
+  name: Reprocesar datos de energía
+  description: Reprocesa los datos locales y regenera las estadísticas.

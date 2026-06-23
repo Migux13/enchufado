@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar Enchufado",
+        "description": "Introduce tus credenciales de Datadis y los datos de tu suministro.",
+        "data": {
+          "datadis_user": "Usuario Datadis (NIF/NIE)",
+          "datadis_password": "Contraseña Datadis",
+          "cups": "CUPS",
+          "authorized_nif": "NIF autorizado (opcional)",
+          "power_high": "Potencia contratada P1/P2 (kW)",
+          "power_low": "Potencia contratada P3 (kW)",
+          "zip_code": "Código postal (opcional)",
+          "bills_number": "Número de facturas a mostrar"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar a Datadis. Verifica tus credenciales.",
+      "unknown": "Error desconocido."
+    }
+  }
+}
