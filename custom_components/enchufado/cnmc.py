@@ -133,6 +133,8 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
             async with session.get(url, ssl=False) as resp:
                 bill = await resp.json()
 
+            _LOGGER.debug("CNMC full response keys: %s", list(bill.keys()) if isinstance(bill, dict) else type(bill))
+            _LOGGER.debug("CNMC full response: %s", str(bill)[:2000])
             gasto = bill.get("graficoGastoTotalActual")
             if gasto:
                 consumo_diario = bill.get("graficaConsumoDiario", {}).get("consumosDiarios", [])
