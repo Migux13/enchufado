@@ -4,7 +4,7 @@
   "documentation": "https://github.com/xMigux/enchufado",
   "issue_tracker": "https://github.com/xMigux/enchufado/issues",
   "codeowners": ["@xMigux"],
-  "requirements": ["e-data==1.2.22", "python-dateutil>=2.8.2"],
+  "requirements": [],
   "dependencies": ["recorder"],
   "config_flow": true,
   "integration_type": "service",

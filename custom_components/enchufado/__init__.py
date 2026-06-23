@@ -1,8 +1,4 @@
-"""Enchufado — PVPC energy statistics via Datadis.
-
-Based on pvpc_energy by yinyang17 (https://github.com/yinyang17/pvpc_energy).
-UFD replaced with Datadis/e-data to support e-distribución and other distributors.
-"""
+"""Enchufado — PVPC energy statistics via Datadis."""
 import asyncio
 import logging
 from os import makedirs

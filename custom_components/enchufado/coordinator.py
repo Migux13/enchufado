@@ -1,8 +1,4 @@
-"""Coordinator for Enchufado integration.
-
-Based on pvpc_energy by yinyang17 (https://github.com/yinyang17/pvpc_energy).
-UFD replaced with Datadis via the e-data library.
-"""
+"""Coordinator for Enchufado integration."""
 import datetime
 import logging
 import time
@@ -21,6 +17,16 @@ from homeassistant.util.unit_conversion import EnergyConverter
 
 from .const import (
     BILLING_PERIODS_FILE,
+    CONF_AUTHORIZED_NIF,
+    CONF_BILLS_NUMBER,
+    CONF_CUPS,
+    CONF_DATADIS_PASSWORD,
+    CONF_DATADIS_USER,
+    CONF_DISTRIBUTOR_CODE,
+    CONF_POINT_TYPE,
+    CONF_POWER_HIGH,
+    CONF_POWER_LOW,
+    CONF_ZIP_CODE,
     CONSUMPTION_STATISTIC_ID,
     CONSUMPTION_STATISTIC_NAME,
     COST_STATISTIC_ID,
@@ -68,21 +74,22 @@ class EnchufadoCoordinator:
     @staticmethod
     def set_config(config, hass):
         _LOGGER.debug("set_config: %s", {k: v for k, v in config.items() if "password" not in k})
-        EnchufadoCoordinator.datadis_user = config["datadis_user"]
-        EnchufadoCoordinator.datadis_password = config["datadis_password"]
-        EnchufadoCoordinator.cups = config["cups"]
-        EnchufadoCoordinator.authorized_nif = config.get("authorized_nif")
-        EnchufadoCoordinator.power_high = config.get("power_high", 4.6)
-        EnchufadoCoordinator.power_low = config.get("power_low", 4.6)
-        EnchufadoCoordinator.zip_code = config.get("zip_code", "")
-        EnchufadoCoordinator.bills_number = config.get("bills_number", 5)
+        EnchufadoCoordinator.datadis_user = config[CONF_DATADIS_USER]
+        EnchufadoCoordinator.datadis_password = config[CONF_DATADIS_PASSWORD]
+        EnchufadoCoordinator.cups = config[CONF_CUPS]
+        EnchufadoCoordinator.authorized_nif = config.get(CONF_AUTHORIZED_NIF)
+        EnchufadoCoordinator.power_high = config.get(CONF_POWER_HIGH, 4.6)
+        EnchufadoCoordinator.power_low = config.get(CONF_POWER_LOW, 4.6)
+        EnchufadoCoordinator.zip_code = config.get(CONF_ZIP_CODE, "")
+        EnchufadoCoordinator.bills_number = config.get(CONF_BILLS_NUMBER, 5)
 
         Datadis.setup(
-            username=config["datadis_user"],
-            password=config["datadis_password"],
-            cups=config["cups"],
-            authorized_nif=config.get("authorized_nif"),
-            storage_path=hass.config.path(f".storage/{DOMAIN}"),
+            username=config[CONF_DATADIS_USER],
+            password=config[CONF_DATADIS_PASSWORD],
+            cups=config[CONF_CUPS],
+            distributor_code=config[CONF_DISTRIBUTOR_CODE],
+            point_type=config[CONF_POINT_TYPE],
+            authorized_nif=config.get(CONF_AUTHORIZED_NIF),
         )
 
     @staticmethod

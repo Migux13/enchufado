@@ -2,10 +2,6 @@
 
 Integración para Home Assistant que muestra el consumo eléctrico y su coste PVPC usando **Datadis** como fuente de datos, compatible con **e-distribución** y otras distribuidoras españolas.
 
-## Créditos
-
-Basado en [pvpc_energy](https://github.com/yinyang17/pvpc_energy) de [@yinyang17](https://github.com/yinyang17). El módulo `ufd.py` ha sido reemplazado por `datadis.py` usando la librería [python-edata](https://github.com/uvejota/python-edata) de [@uvejota](https://github.com/uvejota) para acceder a Datadis, plataforma que permite la interoperabilidad entre distribuidoras (e-distribución, Naturgy, etc.).
-
 Los precios PVPC se obtienen de la API pública de [ESIOS/REE](https://api.esios.ree.es/).
 
 ## ¿Qué hace?
@@ -29,15 +25,24 @@ Los precios PVPC se obtienen de la API pública de [ESIOS/REE](https://api.esios
 
 ## Configuración
 
+El proceso de configuración tiene dos pasos:
+
+**Paso 1 — Credenciales Datadis:**
+
 | Campo | Descripción |
 |-------|-------------|
 | Usuario Datadis | Tu NIF/NIE (el mismo que usas en datadis.es) |
 | Contraseña Datadis | Tu contraseña de datadis.es |
-| CUPS | El CUPS de tu punto de suministro |
 | NIF autorizado | Opcional, si el CUPS está a nombre de otra persona |
+
+**Paso 2 — Selección de suministro:**
+
+| Campo | Descripción |
+|-------|-------------|
+| CUPS | Tu punto de suministro (se carga automáticamente desde Datadis) |
 | Potencia P1/P2 (kW) | Potencia contratada en horas punta/llano |
 | Potencia P3 (kW) | Potencia contratada en horas valle |
-| Código postal | Opcional, para cálculo de facturas con CNMC |
+| Código postal | Opcional |
 | Facturas a mostrar | Número de facturas en el resumen |
 
 ## Panel de energía
