@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Credenciales Datadis",
-        "description": "Introduce tus credenciales de [datadis.es](https://datadis.es).",
+        "description": "Introduce tus credenciales de Datadis.",
         "data": {
           "datadis_user": "Usuario (NIF/NIE)",
           "datadis_password": "Contraseña",

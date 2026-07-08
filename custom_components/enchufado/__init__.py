@@ -71,6 +71,3 @@ async def async_unload_entry(hass, entry) -> bool:
     return unloaded
 
 
-def setup(hass, config):
-    hass.data.setdefault(DOMAIN, {})
-    return True

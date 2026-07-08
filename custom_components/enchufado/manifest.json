@@ -1,14 +1,14 @@
 {
   "domain": "enchufado",
   "name": "Enchufado — PVPC vía Datadis",
-  "documentation": "https://github.com/xMigux/enchufado",
-  "issue_tracker": "https://github.com/xMigux/enchufado/issues",
   "codeowners": ["@xMigux"],
-  "requirements": [],
-  "dependencies": ["recorder"],
   "config_flow": true,
+  "dependencies": ["recorder"],
+  "documentation": "https://github.com/xMigux/enchufado",
   "integration_type": "service",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/xMigux/enchufado/issues",
+  "requirements": [],
   "single_config_entry": true,
   "version": "0.2.3"
 }
