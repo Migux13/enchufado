@@ -5,9 +5,10 @@ https://datadis.es/private-api without external library dependencies.
 """
 import datetime
 import logging
-import time
 
 import aiohttp
+
+from .util import madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ class Datadis:
                 )
                 if not (start_date <= dt.date() <= end_date):
                     continue
-                ts = int(time.mktime(dt.timetuple()))
+                ts = madrid_timestamp(dt)
                 result[ts] = {
                     "value": float(item["consumptionKWh"]),
                     "reading_type": "R" if item.get("obtainMethod") == "Real" else "E",

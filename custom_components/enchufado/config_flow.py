@@ -18,6 +18,7 @@ from .const import (
     CONF_DATADIS_PASSWORD,
     CONF_DATADIS_USER,
     CONF_DISTRIBUTOR_CODE,
+    CONF_ESIOS_TOKEN,
     CONF_POINT_TYPE,
     CONF_POWER_HIGH,
     CONF_POWER_LOW,
@@ -33,6 +34,7 @@ _AUTH_SCHEMA = vol.Schema(
         vol.Required(CONF_DATADIS_USER): cv.string,
         vol.Required(CONF_DATADIS_PASSWORD): cv.string,
         vol.Optional(CONF_AUTHORIZED_NIF, default=""): cv.string,
+        vol.Required(CONF_ESIOS_TOKEN): cv.string,
     }
 )
 
@@ -48,6 +50,7 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             username = user_input[CONF_DATADIS_USER].strip()
             password = user_input[CONF_DATADIS_PASSWORD]
             authorized_nif = user_input.get(CONF_AUTHORIZED_NIF, "").strip() or None
+            esios_token = user_input[CONF_ESIOS_TOKEN].strip()
 
             token = await async_login(username, password)
             if token is None:
@@ -63,6 +66,7 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_DATADIS_USER: username,
                         CONF_DATADIS_PASSWORD: password,
                         CONF_AUTHORIZED_NIF: authorized_nif,
+                        CONF_ESIOS_TOKEN: esios_token,
                     }
                     return await self.async_step_cups()
 

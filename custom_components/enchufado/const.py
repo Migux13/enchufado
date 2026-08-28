@@ -11,6 +11,7 @@ CONF_AUTHORIZED_NIF = "authorized_nif"
 CONF_POWER_HIGH = "power_high"
 CONF_POWER_LOW = "power_low"
 CONF_ZIP_CODE = "zip_code"
+CONF_ESIOS_TOKEN = "esios_token"
 
 # Statistics
 CONSUMPTION_STATISTIC_ID = f"{DOMAIN}:consumption"
@@ -21,7 +22,7 @@ BILL_STATISTIC_ID = f"{DOMAIN}:bill"
 BILL_STATISTIC_NAME = "Factura eléctrica simulada"
 CURRENT_BILL_STATE = f"{DOMAIN}.current_bill"
 
-# Data file paths — stored outside custom_components so HACS updates don't delete them
-USER_FILES_PATH = f"/config/{DOMAIN}"
-ENERGY_FILE = f"{USER_FILES_PATH}/energy_data.csv"
-BILLING_PERIODS_FILE = f"{USER_FILES_PATH}/billing_periods.csv"
+# Data file names — resolved to hass.config.path(DOMAIN)/<name> at runtime,
+# since the config directory isn't always /config (e.g. venv/source installs).
+ENERGY_FILENAME = "energy_data.csv"
+BILLING_PERIODS_FILENAME = "billing_periods.csv"

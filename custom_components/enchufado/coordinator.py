@@ -5,7 +5,7 @@ Statistics handling and data persistence derived from pvpc_energy by yinyang17
 """
 import datetime
 import logging
-import time
+from functools import partial
 from os import makedirs
 from os.path import exists
 
@@ -23,7 +23,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .cnmc import calculate_bill
 from .const import (
-    BILLING_PERIODS_FILE,
+    BILLING_PERIODS_FILENAME,
     BILL_STATISTIC_ID,
     BILL_STATISTIC_NAME,
     CONF_AUTHORIZED_NIF,
@@ -31,6 +31,7 @@ from .const import (
     CONF_DATADIS_PASSWORD,
     CONF_DATADIS_USER,
     CONF_DISTRIBUTOR_CODE,
+    CONF_ESIOS_TOKEN,
     CONF_POINT_TYPE,
     CONF_POWER_HIGH,
     CONF_POWER_LOW,
@@ -41,11 +42,11 @@ from .const import (
     COST_STATISTIC_NAME,
     CURRENT_BILL_STATE,
     DOMAIN,
-    ENERGY_FILE,
-    USER_FILES_PATH,
+    ENERGY_FILENAME,
 )
 from .datadis import Datadis
 from .ree import REE
+from .util import madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +59,10 @@ class EnchufadoCoordinator:
     power_high = None
     power_low = None
     zip_code = None
+    esios_token = None
+    user_files_path = None
+    energy_file = None
+    billing_periods_file = None
 
     consumption_metadata = StatisticMetaData(
         name=CONSUMPTION_STATISTIC_NAME,
@@ -97,6 +102,18 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.power_high = config.get(CONF_POWER_HIGH, 4.6)
         EnchufadoCoordinator.power_low = config.get(CONF_POWER_LOW, 4.6)
         EnchufadoCoordinator.zip_code = config.get(CONF_ZIP_CODE, "")
+        EnchufadoCoordinator.esios_token = config.get(CONF_ESIOS_TOKEN)
+        if not EnchufadoCoordinator.esios_token:
+            _LOGGER.warning(
+                "No ESIOS API token configured — PVPC prices won't update. "
+                "Remove and re-add the Enchufado integration to set one."
+            )
+
+        EnchufadoCoordinator.user_files_path = hass.config.path(DOMAIN)
+        EnchufadoCoordinator.energy_file = f"{EnchufadoCoordinator.user_files_path}/{ENERGY_FILENAME}"
+        EnchufadoCoordinator.billing_periods_file = (
+            f"{EnchufadoCoordinator.user_files_path}/{BILLING_PERIODS_FILENAME}"
+        )
 
         Datadis.setup(
             username=config[CONF_DATADIS_USER],
@@ -110,20 +127,19 @@ class EnchufadoCoordinator:
     @staticmethod
     async def reprocess_energy_data(hass):
         _LOGGER.debug("reprocess_energy_data()")
-        consumptions, prices = await EnchufadoCoordinator.load_energy_data(hass, ENERGY_FILE)
+        consumptions, prices = await EnchufadoCoordinator.load_energy_data(
+            hass, EnchufadoCoordinator.energy_file
+        )
         if consumptions:
             c_stats, cost_stats = EnchufadoCoordinator.create_statistics(0, consumptions, prices, 0, 0)
-            get_instance(hass).async_add_executor_job(
-                async_add_external_statistics, hass, EnchufadoCoordinator.consumption_metadata, c_stats
-            )
-            get_instance(hass).async_add_executor_job(
-                async_add_external_statistics, hass, EnchufadoCoordinator.cost_metadata, cost_stats
-            )
+            async_add_external_statistics(hass, EnchufadoCoordinator.consumption_metadata, c_stats)
+            async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
 
     @staticmethod
     async def import_energy_data(hass, force_update=False):
         _LOGGER.debug("import_energy_data(force_update=%s)", force_update)
-        _LOGGER.debug("energy_data path: %s (exists=%s)", ENERGY_FILE, exists(ENERGY_FILE))
+        energy_file_exists = await hass.async_add_executor_job(exists, EnchufadoCoordinator.energy_file)
+        _LOGGER.debug("energy_data path: %s (exists=%s)", EnchufadoCoordinator.energy_file, energy_file_exists)
 
         # Datadis rejects months whose 1st day exceeds the 2-year window.
         # Advancing by 1 month keeps us safely within the limit.
@@ -134,7 +150,9 @@ class EnchufadoCoordinator:
             start_date = datetime.date(_today.year - 2, _today.month + 1, 1)
         end_date = datetime.date.today() - datetime.timedelta(days=2)
 
-        consumptions, prices = await EnchufadoCoordinator.load_energy_data(hass, ENERGY_FILE, start_date)
+        consumptions, prices = await EnchufadoCoordinator.load_energy_data(
+            hass, EnchufadoCoordinator.energy_file, start_date
+        )
         consumptions_len = len(consumptions)
         prices_len = len(prices)
 
@@ -166,16 +184,20 @@ class EnchufadoCoordinator:
             first_price_date = datetime.datetime.fromtimestamp(min(prices.keys())).date()
             last_price_date = datetime.datetime.fromtimestamp(max(prices.keys())).date()
 
-        if force_update or first_price_date is None or first_price_date > start_date:
-            await EnchufadoCoordinator.get_data(REE.pvpc, start_date, end_date, prices, 28, force_update)
-        elif end_date > last_price_date:
-            await EnchufadoCoordinator.get_data(
-                REE.pvpc, last_price_date + datetime.timedelta(days=1), end_date, prices, 28
-            )
+        if EnchufadoCoordinator.esios_token:
+            ree_pvpc = partial(REE.pvpc, token=EnchufadoCoordinator.esios_token)
+            if force_update or first_price_date is None or first_price_date > start_date:
+                await EnchufadoCoordinator.get_data(ree_pvpc, start_date, end_date, prices, 28, force_update)
+            elif end_date > last_price_date:
+                await EnchufadoCoordinator.get_data(
+                    ree_pvpc, last_price_date + datetime.timedelta(days=1), end_date, prices, 28
+                )
 
         # --- Save and update statistics if data changed ---
         if force_update or len(consumptions) > consumptions_len or len(prices) > prices_len:
-            await EnchufadoCoordinator.save_energy_data(hass, ENERGY_FILE, consumptions, prices)
+            await EnchufadoCoordinator.save_energy_data(
+                hass, EnchufadoCoordinator.energy_file, consumptions, prices
+            )
 
             if consumptions:
                 last_stat = await get_instance(hass).async_add_executor_job(
@@ -221,18 +243,8 @@ class EnchufadoCoordinator:
                     len(c_stats),
                     len(cost_stats),
                 )
-                get_instance(hass).async_add_executor_job(
-                    async_add_external_statistics,
-                    hass,
-                    EnchufadoCoordinator.consumption_metadata,
-                    c_stats,
-                )
-                get_instance(hass).async_add_executor_job(
-                    async_add_external_statistics,
-                    hass,
-                    EnchufadoCoordinator.cost_metadata,
-                    cost_stats,
-                )
+                async_add_external_statistics(hass, EnchufadoCoordinator.consumption_metadata, c_stats)
+                async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
 
         # --- Billing simulation via CNMC ---
         billing_periods = await EnchufadoCoordinator.get_billing_periods(hass, consumptions)
@@ -249,7 +261,7 @@ class EnchufadoCoordinator:
             request_end_date = request_start_date - datetime.timedelta(days=1)
             while (
                 not force_update
-                and int(time.mktime(request_end_date.timetuple())) in data
+                and madrid_timestamp(request_end_date) in data
                 and request_end_date >= start_date
             ):
                 request_end_date -= datetime.timedelta(days=1)
@@ -257,7 +269,7 @@ class EnchufadoCoordinator:
                 break
             request_start_date = request_end_date - datetime.timedelta(days=1)
             while (
-                (force_update or int(time.mktime(request_start_date.timetuple())) not in data)
+                (force_update or madrid_timestamp(request_start_date) not in data)
                 and request_start_date >= start_date
                 and (request_end_date - request_start_date).days < days
             ):
@@ -271,13 +283,14 @@ class EnchufadoCoordinator:
         _LOGGER.debug("get_data: +%d new records", len(data) - data_len)
 
     @staticmethod
-    async def load_energy_data(hass, file_path, start_date=None):
+    def _read_energy_file(file_path, start_date=None):
+        """Blocking: read + parse the energy CSV file. Call via executor."""
         consumptions = {}
         prices = {}
         if not exists(file_path):
             return consumptions, prices
 
-        with await hass.async_add_executor_job(open, file_path, "r") as f:
+        with open(file_path, "r") as f:
             has_reading_type = "reading_type" in f.readline()
             for line in f:
                 parts = line.rstrip("\n").split(",")
@@ -314,9 +327,16 @@ class EnchufadoCoordinator:
         return consumptions, prices
 
     @staticmethod
-    async def save_energy_data(hass, file_path, consumptions, prices):
+    async def load_energy_data(hass, file_path, start_date=None):
+        return await hass.async_add_executor_job(
+            EnchufadoCoordinator._read_energy_file, file_path, start_date
+        )
+
+    @staticmethod
+    def _write_energy_file(file_path, consumptions, prices):
+        """Blocking: write the energy CSV file. Call via executor."""
         timestamps = sorted(set(list(consumptions.keys()) + list(prices.keys())))
-        with await hass.async_add_executor_job(open, file_path, "w") as f:
+        with open(file_path, "w") as f:
             f.write("date,timestamp,consumption,price,reading_type\n")
             for ts in timestamps:
                 date = datetime.datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H")
@@ -325,6 +345,12 @@ class EnchufadoCoordinator:
                 reading_type = "" if c is None else c["reading_type"]
                 price = "" if ts not in prices else prices[ts]
                 f.write(f"{date},{ts},{consumption},{price},{reading_type}\n")
+
+    @staticmethod
+    async def save_energy_data(hass, file_path, consumptions, prices):
+        await hass.async_add_executor_job(
+            EnchufadoCoordinator._write_energy_file, file_path, consumptions, prices
+        )
 
     @staticmethod
     def create_statistics(last_statistic_timestamp, consumptions, prices, total_energy_consumption, total_energy_cost):
@@ -439,7 +465,7 @@ class EnchufadoCoordinator:
     async def get_billing_periods(hass, consumptions):
         """Load existing periods from CSV and extend with any new calendar months."""
         existing = await hass.async_add_executor_job(
-            EnchufadoCoordinator.load_billing_periods, BILLING_PERIODS_FILE
+            EnchufadoCoordinator.load_billing_periods, EnchufadoCoordinator.billing_periods_file
         )
         if not consumptions:
             return existing
@@ -475,8 +501,8 @@ class EnchufadoCoordinator:
     @staticmethod
     async def get_bill(hass, billing_period, consumptions):
         """Extract consumption for one billing period and request CNMC estimate."""
-        start_ts = int(time.mktime(billing_period["start_date"].timetuple()))
-        end_ts = int(time.mktime(billing_period["end_date"].timetuple())) + 86399
+        start_ts = madrid_timestamp(billing_period["start_date"])
+        end_ts = madrid_timestamp(billing_period["end_date"]) + 86399
 
         period_consumptions = {
             ts: consumptions[ts]["value"]
@@ -539,7 +565,9 @@ class EnchufadoCoordinator:
 
         if changed:
             await hass.async_add_executor_job(
-                EnchufadoCoordinator.save_billing_periods, BILLING_PERIODS_FILE, billing_periods
+                EnchufadoCoordinator.save_billing_periods,
+                EnchufadoCoordinator.billing_periods_file,
+                billing_periods,
             )
 
         calculated = [
@@ -591,9 +619,4 @@ class EnchufadoCoordinator:
             bill_stats.append(StatisticData(start=start, state=tc, sum=cumulative))
 
         if bill_stats:
-            get_instance(hass).async_add_executor_job(
-                async_add_external_statistics,
-                hass,
-                EnchufadoCoordinator.bill_metadata,
-                bill_stats,
-            )
+            async_add_external_statistics(hass, EnchufadoCoordinator.bill_metadata, bill_stats)

@@ -7,9 +7,10 @@ import base64
 import datetime
 import logging
 import re
-import time
 
 import aiohttp
+
+from .util import madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +97,6 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
                 _UPLOAD_URL,
                 headers=_HEADERS,
                 json={"file": f"data:text/csv;base64,{encoded}"},
-                ssl=False,
             ) as resp:
                 response_text = await resp.text()
 
@@ -127,10 +127,10 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
                 energy_file=energy_file,
                 start_date=(billing_period["start_date"] - datetime.timedelta(days=1)).isoformat(),
                 end_date=billing_period["end_date"].isoformat(),
-                start_timestamp=int(time.mktime((billing_period["start_date"] - datetime.timedelta(days=1)).timetuple())) * 1000,
-                end_timestamp=int(time.mktime(billing_period["end_date"].timetuple())) * 1000,
+                start_timestamp=madrid_timestamp(billing_period["start_date"] - datetime.timedelta(days=1)) * 1000,
+                end_timestamp=madrid_timestamp(billing_period["end_date"]) * 1000,
             )
-            async with session.get(url, ssl=False) as resp:
+            async with session.get(url) as resp:
                 bill = await resp.json()
 
             _LOGGER.debug("CNMC full response keys: %s", list(bill.keys()) if isinstance(bill, dict) else type(bill))

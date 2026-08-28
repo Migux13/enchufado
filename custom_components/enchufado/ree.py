@@ -10,20 +10,19 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class REE:
-    _token = "20dada670614470c2f0cd1ff9042018bbedd5ab3796b1f96fd56d0dc209f4480"
     _url = "https://api.esios.ree.es/indicators/1001?geo_ids[]=8741&start_date={start_date}&end_date={end_date}"
 
     @staticmethod
-    def _headers():
+    def _headers(token):
         return {
             "Accept": "application/json; application/vnd.esios-api-v2+json",
             "Content-Type": "application/json",
             "Host": "api.esios.ree.es",
-            "x-api-key": REE._token,
+            "x-api-key": token,
         }
 
     @staticmethod
-    async def pvpc(start_date, end_date):
+    async def pvpc(start_date, end_date, token):
         _LOGGER.debug("REE.pvpc: %s -> %s", start_date.isoformat(), end_date.isoformat())
         url = REE._url.format(
             start_date=start_date.strftime("%Y-%m-%d"),
@@ -31,7 +30,7 @@ class REE:
         )
         response = None
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=REE._headers(), ssl=False) as resp:
+            async with session.get(url, headers=REE._headers(token)) as resp:
                 if resp.status == 200:
                     response = await resp.json()
 

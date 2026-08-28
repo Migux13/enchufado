@@ -7,7 +7,11 @@
         "data": {
           "datadis_user": "Usuario (NIF/NIE)",
           "datadis_password": "Contraseña",
-          "authorized_nif": "NIF autorizado (opcional, si el CUPS está a nombre de otra persona)"
+          "authorized_nif": "NIF autorizado (opcional, si el CUPS está a nombre de otra persona)",
+          "esios_token": "Token API ESIOS-REE"
+        },
+        "data_description": {
+          "esios_token": "Token personal gratuito, necesario para obtener el precio PVPC. Se solicita por email a ESIOS-REE."
         }
       },
       "cups": {

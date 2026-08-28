@@ -4,11 +4,11 @@
   "codeowners": ["@xMigux"],
   "config_flow": true,
   "dependencies": ["recorder"],
-  "documentation": "https://github.com/xMigux/enchufado",
+  "documentation": "https://github.com/Migux13/enchufado",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/xMigux/enchufado/issues",
+  "issue_tracker": "https://github.com/Migux13/enchufado/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.2.5"
+  "version": "0.3.0"
 }

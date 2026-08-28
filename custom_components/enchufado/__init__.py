@@ -8,7 +8,7 @@ from random import randint
 from homeassistant.const import Platform
 from homeassistant.helpers.event import async_track_time_change
 
-from .const import DOMAIN, USER_FILES_PATH
+from .const import DOMAIN
 from .coordinator import EnchufadoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,17 +29,17 @@ async def async_setup_entry(hass, entry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    _setup_services(hass)
+    _setup_services(hass, entry)
     hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
     return True
 
 
 def _ensure_data_dir():
-    if not exists(USER_FILES_PATH):
-        makedirs(USER_FILES_PATH)
+    if not exists(EnchufadoCoordinator.user_files_path):
+        makedirs(EnchufadoCoordinator.user_files_path)
 
 
-def _setup_services(hass) -> None:
+def _setup_services(hass, entry) -> None:
     async def _handle_import(call):
         hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
 
@@ -56,7 +56,8 @@ def _setup_services(hass) -> None:
     hass.services.async_register(DOMAIN, "import_energy_data", _handle_import)
     hass.services.async_register(DOMAIN, "force_import_energy_data", _handle_force_import)
     hass.services.async_register(DOMAIN, "reprocess_energy_data", _handle_reprocess)
-    async_track_time_change(hass, _handle_scheduled_import, hour=6, minute=30, second=0)
+    unsub_tracker = async_track_time_change(hass, _handle_scheduled_import, hour=6, minute=30, second=0)
+    entry.async_on_unload(unsub_tracker)
 
 
 async def options_update_listener(hass, config_entry):
@@ -68,6 +69,9 @@ async def async_unload_entry(hass, entry) -> bool:
     if unloaded:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
         entry_data["unsub_options_update_listener"]()
+        hass.services.async_remove(DOMAIN, "import_energy_data")
+        hass.services.async_remove(DOMAIN, "force_import_energy_data")
+        hass.services.async_remove(DOMAIN, "reprocess_energy_data")
     return unloaded
 
 
