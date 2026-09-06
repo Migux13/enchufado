@@ -10,7 +10,7 @@ import re
 
 import aiohttp
 
-from .util import madrid_timestamp
+from .util import MADRID_TZ, madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,8 +62,8 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
         return billing_period, None
 
     # Billing period must match consumption range exactly
-    first_day = datetime.datetime.fromtimestamp(timestamps[0]).date()
-    last_day = datetime.datetime.fromtimestamp(timestamps[-1]).date()
+    first_day = datetime.datetime.fromtimestamp(timestamps[0], MADRID_TZ).date()
+    last_day = datetime.datetime.fromtimestamp(timestamps[-1], MADRID_TZ).date()
     if billing_period["start_date"] != first_day or billing_period["end_date"] != last_day:
         return billing_period, None
 
@@ -77,7 +77,7 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
     total_consumption = 0.0
     csv_lines = ["CUPS;Fecha;Hora;Consumo;Metodo_obtencion\r\n"]
     for ts in timestamps:
-        dt = datetime.datetime.fromtimestamp(ts)
+        dt = datetime.datetime.fromtimestamp(ts, MADRID_TZ)
         kwh = consumptions[ts]
         total_consumption += kwh
         csv_lines.append(

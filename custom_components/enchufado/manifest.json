@@ -1,7 +1,7 @@
 {
   "domain": "enchufado",
   "name": "Enchufado — PVPC vía Datadis",
-  "codeowners": ["@xMigux"],
+  "codeowners": ["@Migux13"],
   "config_flow": true,
   "dependencies": ["recorder"],
   "documentation": "https://github.com/Migux13/enchufado",
@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/Migux13/enchufado/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.3.0"
+  "version": "0.3.1"
 }

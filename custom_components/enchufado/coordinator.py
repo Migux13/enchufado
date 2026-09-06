@@ -46,7 +46,7 @@ from .const import (
 )
 from .datadis import Datadis
 from .ree import REE
-from .util import madrid_timestamp
+from .util import MADRID_TZ, madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,9 +92,14 @@ class EnchufadoCoordinator:
         unit_of_measurement=CURRENCY_EURO,
     )
 
+    _SENSITIVE_CONFIG_KEYS = {CONF_DATADIS_USER, CONF_DATADIS_PASSWORD, CONF_AUTHORIZED_NIF, CONF_ESIOS_TOKEN}
+
     @staticmethod
     def set_config(config, hass):
-        _LOGGER.debug("set_config: %s", {k: v for k, v in config.items() if "password" not in k})
+        _LOGGER.debug(
+            "set_config: %s",
+            {k: v for k, v in config.items() if k not in EnchufadoCoordinator._SENSITIVE_CONFIG_KEYS},
+        )
         EnchufadoCoordinator.datadis_user = config[CONF_DATADIS_USER]
         EnchufadoCoordinator.datadis_password = config[CONF_DATADIS_PASSWORD]
         EnchufadoCoordinator.cups = config[CONF_CUPS]
@@ -159,8 +164,8 @@ class EnchufadoCoordinator:
         first_consumption_date = None
         last_consumption_date = None
         if consumptions:
-            first_consumption_date = datetime.datetime.fromtimestamp(min(consumptions.keys())).date()
-            last_consumption_date = datetime.datetime.fromtimestamp(max(consumptions.keys())).date()
+            first_consumption_date = datetime.datetime.fromtimestamp(min(consumptions.keys()), MADRID_TZ).date()
+            last_consumption_date = datetime.datetime.fromtimestamp(max(consumptions.keys()), MADRID_TZ).date()
 
         # --- Fetch consumption from Datadis ---
         datadis_start = start_date
@@ -181,8 +186,8 @@ class EnchufadoCoordinator:
         first_price_date = None
         last_price_date = None
         if prices:
-            first_price_date = datetime.datetime.fromtimestamp(min(prices.keys())).date()
-            last_price_date = datetime.datetime.fromtimestamp(max(prices.keys())).date()
+            first_price_date = datetime.datetime.fromtimestamp(min(prices.keys()), MADRID_TZ).date()
+            last_price_date = datetime.datetime.fromtimestamp(max(prices.keys()), MADRID_TZ).date()
 
         if EnchufadoCoordinator.esios_token:
             ree_pvpc = partial(REE.pvpc, token=EnchufadoCoordinator.esios_token)
@@ -208,7 +213,7 @@ class EnchufadoCoordinator:
                     or not last_stat
                     or first_consumption_date is None
                     or first_consumption_date
-                    != datetime.datetime.fromtimestamp(min(consumptions.keys())).date()
+                    != datetime.datetime.fromtimestamp(min(consumptions.keys()), MADRID_TZ).date()
                     or last_consumption_date
                     != datetime.datetime.fromtimestamp(
                         last_stat[CONSUMPTION_STATISTIC_ID][0]["start"], datetime.UTC
@@ -307,10 +312,10 @@ class EnchufadoCoordinator:
 
         if start_date and consumptions:
             timestamps = sorted(consumptions.keys())
-            previous_day = datetime.datetime.fromtimestamp(timestamps[0]).date()
+            previous_day = datetime.datetime.fromtimestamp(timestamps[0], MADRID_TZ).date()
             hours = 0
             for ts in timestamps:
-                day = datetime.datetime.fromtimestamp(ts).date()
+                day = datetime.datetime.fromtimestamp(ts, MADRID_TZ).date()
                 if day == previous_day:
                     hours += 1
                 elif hours in (23, 24, 25) or day < start_date:
@@ -320,7 +325,7 @@ class EnchufadoCoordinator:
                     consumptions = {
                         t: consumptions[t]
                         for t in timestamps
-                        if datetime.datetime.fromtimestamp(t).date() < previous_day
+                        if datetime.datetime.fromtimestamp(t, MADRID_TZ).date() < previous_day
                     }
                     break
 
@@ -339,7 +344,7 @@ class EnchufadoCoordinator:
         with open(file_path, "w") as f:
             f.write("date,timestamp,consumption,price,reading_type\n")
             for ts in timestamps:
-                date = datetime.datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H")
+                date = datetime.datetime.fromtimestamp(ts, MADRID_TZ).strftime("%d/%m/%Y %H")
                 c = consumptions.get(ts)
                 consumption = "" if c is None else c["value"]
                 reading_type = "" if c is None else c["reading_type"]
@@ -370,7 +375,7 @@ class EnchufadoCoordinator:
             consumption = c["value"] if c else 0.0
             total_energy_consumption += consumption
             day_energy_consumption += consumption
-            if datetime.datetime.fromtimestamp(timestamp).hour == 0:
+            if datetime.datetime.fromtimestamp(timestamp, MADRID_TZ).hour == 0:
                 day_energy_consumption = consumption
 
             start = datetime.datetime.fromtimestamp(timestamp, datetime.UTC)
@@ -382,7 +387,7 @@ class EnchufadoCoordinator:
             hour_cost = consumption * price
             total_energy_cost += hour_cost
             day_energy_cost += hour_cost
-            if datetime.datetime.fromtimestamp(timestamp).hour == 0:
+            if datetime.datetime.fromtimestamp(timestamp, MADRID_TZ).hour == 0:
                 day_energy_cost = hour_cost
             cost_statistics.append(
                 StatisticData(start=start, state=day_energy_cost, sum=total_energy_cost)
@@ -471,8 +476,8 @@ class EnchufadoCoordinator:
             return existing
 
         existing_by_start = {p["start_date"]: p for p in existing}
-        start_date = datetime.datetime.fromtimestamp(min(consumptions.keys())).date()
-        end_date = datetime.datetime.fromtimestamp(max(consumptions.keys())).date()
+        start_date = datetime.datetime.fromtimestamp(min(consumptions.keys()), MADRID_TZ).date()
+        end_date = datetime.datetime.fromtimestamp(max(consumptions.keys()), MADRID_TZ).date()
         today = datetime.date.today()
 
         for p in EnchufadoCoordinator.generate_monthly_periods(
