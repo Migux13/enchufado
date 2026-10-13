@@ -43,7 +43,11 @@ from .const import (
     CURRENT_BILL_STATE,
     DOMAIN,
     ENERGY_FILENAME,
+    TOTAL_COST_SIGNATURE_FILENAME,
+    TOTAL_COST_STATISTIC_ID,
+    TOTAL_COST_STATISTIC_NAME,
 )
+from . import tariffs
 from .datadis import Datadis
 from .ree import REE
 from .util import MADRID_TZ, madrid_timestamp
@@ -66,6 +70,7 @@ class EnchufadoCoordinator:
     user_files_path = None
     energy_file = None
     billing_periods_file = None
+    total_cost_signature_file = None
 
     consumption_metadata = StatisticMetaData(
         name=CONSUMPTION_STATISTIC_NAME,
@@ -83,6 +88,15 @@ class EnchufadoCoordinator:
         has_sum=True,
         source=DOMAIN,
         statistic_id=COST_STATISTIC_ID,
+        unit_of_measurement=CURRENCY_EURO,
+    )
+    total_cost_metadata = StatisticMetaData(
+        name=TOTAL_COST_STATISTIC_NAME,
+        mean_type=StatisticMeanType.NONE,
+        unit_class=None,
+        has_sum=True,
+        source=DOMAIN,
+        statistic_id=TOTAL_COST_STATISTIC_ID,
         unit_of_measurement=CURRENCY_EURO,
     )
     bill_metadata = StatisticMetaData(
@@ -123,6 +137,10 @@ class EnchufadoCoordinator:
             f"{EnchufadoCoordinator.user_files_path}/{BILLING_PERIODS_FILENAME}"
         )
 
+        EnchufadoCoordinator.total_cost_signature_file = (
+            f"{EnchufadoCoordinator.user_files_path}/{TOTAL_COST_SIGNATURE_FILENAME}"
+        )
+
         Datadis.setup(
             username=config[CONF_DATADIS_USER],
             password=config[CONF_DATADIS_PASSWORD],
@@ -142,6 +160,7 @@ class EnchufadoCoordinator:
             c_stats, cost_stats = EnchufadoCoordinator.create_statistics(0, consumptions, prices, 0, 0)
             async_add_external_statistics(hass, EnchufadoCoordinator.consumption_metadata, c_stats)
             async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
+            await EnchufadoCoordinator.update_total_cost_statistics(hass, consumptions, prices, True, set())
 
     @staticmethod
     async def import_energy_data(hass, force_update=False):
@@ -163,6 +182,7 @@ class EnchufadoCoordinator:
         )
         consumptions_len = len(consumptions)
         prices_len = len(prices)
+        price_keys_before = set(prices)
 
         first_consumption_date = None
         last_consumption_date = None
@@ -270,11 +290,98 @@ class EnchufadoCoordinator:
                 async_add_external_statistics(hass, EnchufadoCoordinator.consumption_metadata, c_stats)
                 async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
 
+        # --- Total cost (energy + fixed terms + taxes) ---
+        await EnchufadoCoordinator.update_total_cost_statistics(
+            hass, consumptions, prices, force_update, price_keys_before
+        )
+
         # --- Billing simulation via CNMC ---
         billing_periods = await EnchufadoCoordinator.get_billing_periods(hass, consumptions)
-        await EnchufadoCoordinator.calculate_bills(hass, billing_periods, consumptions, force_update)
+        await EnchufadoCoordinator.calculate_bills(hass, billing_periods, consumptions, force_update, prices)
 
         _LOGGER.debug("import_energy_data() done")
+
+    @staticmethod
+    def _read_text(file_path):
+        """Blocking: file contents or None. Call via executor."""
+        if not exists(file_path):
+            return None
+        with open(file_path, "r") as f:
+            return f.read().strip()
+
+    @staticmethod
+    def _write_text(file_path, text):
+        """Blocking: write a small text file. Call via executor."""
+        with open(file_path, "w") as f:
+            f.write(text)
+
+    @staticmethod
+    async def update_total_cost_statistics(hass, consumptions, prices, force_update, price_keys_before):
+        """Write enchufado:total_cost: energy + prorated fixed terms + taxes, hour by hour.
+
+        Rebuilt from scratch when forced, when the regulated-values table or the contracted
+        power changed (signature), when prices arrive for hours already written, or when
+        there is no statistic yet; otherwise it only appends the new hours.
+        """
+        if not consumptions:
+            return
+        power_high = EnchufadoCoordinator.power_high or 4.6
+        power_low = EnchufadoCoordinator.power_low or 4.6
+        signature = tariffs.signature(power_high, power_low)
+        stored_signature = await hass.async_add_executor_job(
+            EnchufadoCoordinator._read_text, EnchufadoCoordinator.total_cost_signature_file
+        )
+        last = await get_instance(hass).async_add_executor_job(
+            get_last_statistics, hass, 1, TOTAL_COST_STATISTIC_ID, True, {"state", "sum"}
+        )
+        last_row = last[TOTAL_COST_STATISTIC_ID][0] if last and last.get(TOTAL_COST_STATISTIC_ID) else None
+
+        full = force_update or stored_signature != signature or last_row is None
+        if not full and any(ts <= last_row["start"] for ts in prices if ts not in price_keys_before):
+            full = True
+        if full:
+            _LOGGER.info("Rebuilding %s from scratch", TOTAL_COST_STATISTIC_ID)
+            first_ts, total, day_cost = min(consumptions), 0.0, 0.0
+        else:
+            first_ts = int(last_row["start"]) + 3600
+            total, day_cost = last_row["sum"] or 0.0, last_row["state"] or 0.0
+
+        last_ts = max(consumptions)
+        rows = tariffs.create_total_cost_series(
+            first_ts, last_ts, consumptions, prices, power_high, power_low, day_cost
+        )
+        if rows:
+            stats = []
+            for ts, hour_cost, state in rows:
+                total += hour_cost
+                stats.append(
+                    StatisticData(start=datetime.datetime.fromtimestamp(ts, datetime.UTC), state=state, sum=total)
+                )
+            _LOGGER.info("Inserting %d %s records", len(stats), TOTAL_COST_STATISTIC_ID)
+            async_add_external_statistics(hass, EnchufadoCoordinator.total_cost_metadata, stats)
+        if stored_signature != signature:
+            await hass.async_add_executor_job(
+                EnchufadoCoordinator._write_text, EnchufadoCoordinator.total_cost_signature_file, signature
+            )
+
+    @staticmethod
+    def _log_cnmc_difference(period, consumptions, prices):
+        """Debug only: local total cost of a period vs the CNMC simulated bill."""
+        first_ts = madrid_timestamp(period["start_date"])
+        last_ts = madrid_timestamp(period["end_date"] + datetime.timedelta(days=1)) - 3600
+        rows = tariffs.create_total_cost_series(
+            first_ts,
+            last_ts,
+            {ts: c for ts, c in consumptions.items() if first_ts <= ts <= last_ts},
+            prices,
+            period["power_high"],
+            period["power_low"],
+        )
+        local = sum(cost for _, cost, _ in rows)
+        _LOGGER.debug(
+            "Total cost %s→%s: local=%.2f € CNMC=%.2f € diff=%+.2f €",
+            period["start_date"], period["end_date"], local, period["total_cost"], local - period["total_cost"],
+        )
 
     @staticmethod
     async def get_data(getter, start_date, end_date, data, days, force_update=False):
@@ -570,7 +677,7 @@ class EnchufadoCoordinator:
         return updated
 
     @staticmethod
-    async def calculate_bills(hass, billing_periods, consumptions, force_update=False):
+    async def calculate_bills(hass, billing_periods, consumptions, force_update=False, prices=None):
         """Calculate CNMC bills for recent periods and publish enchufado.current_bill state."""
         if not billing_periods or not consumptions:
             return
@@ -596,6 +703,11 @@ class EnchufadoCoordinator:
             if force_update or not has_cost:
                 try:
                     await EnchufadoCoordinator.get_bill(hass, period, consumptions)
+                    if prices and isinstance(period.get("total_cost"), (int, float)) and _LOGGER.isEnabledFor(logging.DEBUG):
+                        try:
+                            EnchufadoCoordinator._log_cnmc_difference(period, consumptions, prices)
+                        except Exception as diff_err:  # never block on a debug comparison
+                            _LOGGER.debug("Could not compare with CNMC: %s", diff_err)
                 except CNMCUnavailable as err:
                     _LOGGER.warning(
                         "CNMC comparator unavailable (%s): bill simulation skipped, "
