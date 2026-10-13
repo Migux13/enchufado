@@ -116,21 +116,53 @@ def test_history_round_trip_and_corrupt_file():
     assert maxpower.load(None) == {"checked": [], "months": {}}
 
 
-@pytest.mark.parametrize("day,expected", [
-    (D(2026, 5, 1), None), (D(2026, 5, 2), None),
-    (D(2026, 5, 3), (D(2026, 4, 1), D(2026, 4, 1))),
-    (D(2026, 1, 15), (D(2025, 12, 1), D(2025, 12, 1))),
-])
-def test_max_power_is_asked_from_day_3_for_the_closed_previous_month(day, expected):
-    assert quota.plan_max_power(day, [], at(day)) == expected
+WIDE_MAY = (D(2025, 5, 1), D(2026, 4, 1))  # last 12 closed months as seen from May 2026
+
+
+@pytest.mark.parametrize("day", [D(2026, 5, 1), D(2026, 5, 2)])
+def test_max_power_is_not_asked_before_day_3(day):
+    assert quota.plan_max_power(day, [], at(day)) is None
+
+
+def test_first_use_asks_the_last_12_closed_months_in_one_query():
+    day = D(2026, 5, 3)
+    first, last = quota.plan_max_power(day, [], at(day))
+    assert (first, last) == WIDE_MAY
+    months = list(maxpower._months_between(first, last))
+    assert len(months) == 12 and months[0] == D(2025, 5, 1) and months[-1] == D(2026, 4, 1)
+    assert quota.plan_max_power(D(2026, 1, 15), [], at(D(2026, 1, 15))) == (D(2025, 1, 1), D(2025, 12, 1))
+
+
+def test_wide_query_marks_all_its_months_and_monthly_queries_follow():
+    first, last = WIDE_MAY
+    records = [{"period": 1, "date": D(2025, 11, 9), "time": "10:15", "kw": 2.5}]
+    history = maxpower.merge({"checked": [], "months": {}}, first, records, last)
+    done = maxpower.done_months(history)
+    assert len(done) == 12 and first in done and last in done
+    # nothing more to ask in May, whatever the answer contained
+    assert quota.plan_max_power(D(2026, 5, 20), [], at(D(2026, 5, 20)), done) is None
+    # in June only the newly closed month
+    assert quota.plan_max_power(D(2026, 6, 3), [], at(D(2026, 6, 3)), done) == (D(2026, 5, 1), D(2026, 5, 1))
+
+
+def test_wide_query_uses_the_same_quota_log():
+    day = D(2026, 5, 3)
+    log = quota.record([], WIDE_MAY, at(day, 6, 31), quota.MAX_POWER)
+    assert quota.plan_max_power(day, log, at(day, 20)) is None  # still empty history, but locked
+    assert quota.plan_max_power(D(2026, 5, 4), log, at(D(2026, 5, 4), 6, 42)) == WIDE_MAY
 
 
 def test_max_power_is_not_asked_again_once_the_month_is_answered():
     assert quota.plan_max_power(D(2026, 5, 20), [], at(D(2026, 5, 20)), {D(2026, 4, 1)}) is None
 
 
+def test_max_power_monthly_query_is_the_closed_previous_month():
+    done = {D(2026, 3, 1)}
+    assert quota.plan_max_power(D(2026, 5, 3), [], at(D(2026, 5, 3)), done) == (D(2026, 4, 1), D(2026, 4, 1))
+
+
 def test_max_power_respects_the_24h10_lock_and_retries_the_next_day():
-    q = (D(2026, 4, 1), D(2026, 4, 1))
+    q = WIDE_MAY
     log = quota.record([], q, at(D(2026, 5, 3), 6, 31), quota.MAX_POWER)
     assert quota.plan_max_power(D(2026, 5, 3), log, at(D(2026, 5, 3), 20)) is None
     assert quota.plan_max_power(D(2026, 5, 4), log, at(D(2026, 5, 4), 6, 30)) is None  # 23 h 59 min
@@ -142,9 +174,9 @@ def test_endpoints_have_independent_quotas():
     consumption_q = (D(2026, 5, 1), D(2026, 5, 1))
     log = quota.record([], consumption_q, at(today), quota.CONSUMPTION)
     # a consumption query today does not block max power...
-    assert quota.plan_max_power(today, log, at(today, 7)) == (D(2026, 4, 1), D(2026, 4, 1))
+    assert quota.plan_max_power(today, log, at(today, 7)) == WIDE_MAY
     # ...and a max power query does not count as the day's consumption query
-    log = quota.record([], (D(2026, 4, 1), D(2026, 4, 1)), at(today), quota.MAX_POWER)
+    log = quota.record([], WIDE_MAY, at(today), quota.MAX_POWER)
     assert quota.plan_query(today, log, at(today, 7), last_stored_day=today) is not None
 
 

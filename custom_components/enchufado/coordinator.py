@@ -262,8 +262,10 @@ class EnchufadoCoordinator:
             query = quota.plan_max_power(now.date(), queries, now, maxpower.done_months(history))
             if query is None:
                 return
-            _LOGGER.info("Datadis max power query: %s", query[0].strftime("%Y/%m"))
-            records, status = await Datadis.max_power(query[0])
+            _LOGGER.info(
+                "Datadis max power query: %s → %s", query[0].strftime("%Y/%m"), query[1].strftime("%Y/%m")
+            )
+            records, status = await Datadis.max_power(*query)
             if status is not None and status != 401:
                 queries = quota.record(queries, query, now, quota.MAX_POWER)
                 await hass.async_add_executor_job(
@@ -273,7 +275,7 @@ class EnchufadoCoordinator:
                 )
             if status != 200:
                 return
-            history = maxpower.merge(history, query[0], records)
+            history = maxpower.merge(history, query[0], records, query[1])
             await hass.async_add_executor_job(
                 EnchufadoCoordinator._write_text,
                 EnchufadoCoordinator.max_power_file,

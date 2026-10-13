@@ -212,8 +212,8 @@ class Datadis:
         return result, status
 
     @staticmethod
-    async def max_power(month: datetime.date) -> tuple:
-        """Maximum demanded power of one closed month (one query to get-max-power-v2).
+    async def max_power(first_month: datetime.date, last_month: datetime.date | None = None) -> tuple:
+        """Maximum demanded power of closed months (one query to get-max-power-v2).
 
         Returns (records, status): ``records`` as in maxpower.parse_max_power, ``status``
         the HTTP status or None when no response was received. Like the consumption
@@ -230,8 +230,8 @@ class Datadis:
         params = {
             "cups": Datadis.cups,
             "distributorCode": Datadis.distributor_code,
-            "startDate": month.strftime("%Y/%m"),
-            "endDate": month.strftime("%Y/%m"),
+            "startDate": first_month.strftime("%Y/%m"),
+            "endDate": (last_month or first_month).strftime("%Y/%m"),
         }
         if Datadis.authorized_nif:
             params["authorizedNif"] = Datadis.authorized_nif
@@ -245,7 +245,9 @@ class Datadis:
         records, errors = parse_max_power(data)
         if errors:
             _LOGGER.warning("Datadis max power distributorError: %s", errors)
-        _LOGGER.info("Datadis: %d max power records (%s)", len(records), params["startDate"])
+        _LOGGER.info(
+            "Datadis: %d max power records (%s → %s)", len(records), params["startDate"], params["endDate"]
+        )
         return records, status
 
     @staticmethod

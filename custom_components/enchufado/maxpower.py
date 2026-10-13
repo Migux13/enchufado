@@ -48,16 +48,25 @@ def month_key(day):
     return f"{day.year:04d}-{day.month:02d}"
 
 
-def merge(history, queried_month, records):
-    """History with ``records`` added (highest value per period and month) and the queried
-    month marked as answered."""
+def _months_between(first, last):
+    day = first.replace(day=1)
+    while day <= last:
+        yield day
+        day = (day.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+
+
+def merge(history, queried_month, records, last_queried_month=None):
+    """History with ``records`` added (highest value per period and month) and every month
+    from ``queried_month`` to ``last_queried_month`` (default: just the first) marked as
+    answered."""
     months = {k: dict(v) for k, v in (history.get("months") or {}).items()}
     for r in records:
         slot = months.setdefault(month_key(r["date"]), {})
         current = slot.get(str(r["period"]))
         if current is None or r["kw"] > current["kw"]:
             slot[str(r["period"])] = {"kw": r["kw"], "date": r["date"].isoformat(), "time": r["time"]}
-    checked = sorted(set(history.get("checked") or []) | {month_key(queried_month)})
+    answered = {month_key(m) for m in _months_between(queried_month, last_queried_month or queried_month)}
+    checked = sorted(set(history.get("checked") or []) | answered)
     return {"checked": checked, "months": months}
 
 

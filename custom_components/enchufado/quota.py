@@ -40,18 +40,23 @@ def is_blocked(query, log, now, endpoint=CONSUMPTION):
 
 
 def plan_max_power(today, log, now, done_months=()):
-    """Month (as a (first, first) query) of max-power data to ask for, or None.
+    """Month range (first_month, last_month) of max-power data to ask for, or None.
 
-    Once a month, from day 3, for the closed previous month. ``done_months`` are the
-    months already answered (first day of each); the lock window still applies, so a
-    failed query is retried at most once a day.
+    From day 3 of each month, for the closed previous month. The very first time
+    (``done_months`` empty) one wide query covers the last 12 closed months instead.
+    ``done_months`` are the months already answered (first day of each); the lock window
+    still applies, so a failed query is retried at most once a day.
     """
     if today.day < 3:
         return None
     month = previous_month(month_start(today))
     if month in done_months:
         return None
-    query = (month, month)
+    first = month
+    if not done_months:
+        for _ in range(11):
+            first = previous_month(first)
+    query = (first, month)
     return None if is_blocked(query, log, now, MAX_POWER) else query
 
 
