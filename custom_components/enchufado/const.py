@@ -13,6 +13,9 @@ CONF_POWER_LOW = "power_low"
 CONF_ZIP_CODE = "zip_code"
 CONF_ESIOS_TOKEN = "esios_token"
 
+# Repair issues
+ISSUE_MISSING_ESIOS_TOKEN = "missing_esios_token"
+
 # Statistics
 CONSUMPTION_STATISTIC_ID = f"{DOMAIN}:consumption"
 CONSUMPTION_STATISTIC_NAME = "Consumo eléctrico PVPC"

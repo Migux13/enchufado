@@ -111,7 +111,7 @@ class EnchufadoCoordinator:
         if not EnchufadoCoordinator.esios_token:
             _LOGGER.warning(
                 "No ESIOS API token configured — PVPC prices won't update. "
-                "Remove and re-add the Enchufado integration to set one."
+                "Add one from Settings → Devices & services → Enchufado → Reconfigure."
             )
 
         EnchufadoCoordinator.user_files_path = hass.config.path(DOMAIN)
@@ -189,6 +189,7 @@ class EnchufadoCoordinator:
             first_price_date = datetime.datetime.fromtimestamp(min(prices.keys()), MADRID_TZ).date()
             last_price_date = datetime.datetime.fromtimestamp(max(prices.keys()), MADRID_TZ).date()
 
+        old_price_timestamps = set(prices)
         if EnchufadoCoordinator.esios_token:
             ree_pvpc = partial(REE.pvpc, token=EnchufadoCoordinator.esios_token)
             if force_update or first_price_date is None or first_price_date > start_date:
@@ -208,8 +209,23 @@ class EnchufadoCoordinator:
                 last_stat = await get_instance(hass).async_add_executor_job(
                     get_last_statistics, hass, 1, CONSUMPTION_STATISTIC_ID, True, set()
                 )
+                last_cost_stat = await get_instance(hass).async_add_executor_job(
+                    get_last_statistics, hass, 1, COST_STATISTIC_ID, True, set()
+                )
+                # Prices that arrive late (e.g. after setting the ESIOS token) for hours
+                # whose cost statistic was already written at price 0 are not reached by
+                # the incremental path below: rebuild the cost statistics from scratch.
+                backfilled_prices = False
+                if last_cost_stat and last_cost_stat.get(COST_STATISTIC_ID):
+                    last_cost_ts = last_cost_stat[COST_STATISTIC_ID][0]["start"]
+                    backfilled_prices = any(
+                        ts <= last_cost_ts for ts in prices if ts not in old_price_timestamps
+                    )
+                    if backfilled_prices:
+                        _LOGGER.info("New prices for hours already in the cost statistic: rebuilding it")
                 if (
                     force_update
+                    or backfilled_prices
                     or not last_stat
                     or first_consumption_date is None
                     or first_consumption_date
