@@ -483,6 +483,13 @@ class EnchufadoCoordinator:
         end_date = datetime.datetime.fromtimestamp(max(consumptions.keys()), MADRID_TZ).date()
         today = datetime.date.today()
 
+        last_day_with_data = {}
+        for ts in consumptions:
+            day = datetime.datetime.fromtimestamp(ts, MADRID_TZ).date()
+            key = (day.year, day.month)
+            if day >= last_day_with_data.get(key, day):
+                last_day_with_data[key] = day
+
         for p in EnchufadoCoordinator.generate_monthly_periods(
             start_date,
             end_date,
@@ -495,16 +502,20 @@ class EnchufadoCoordinator:
                 existing_p = existing_by_start[p["start_date"]]
                 is_current_month = p["start_date"].month == today.month and p["start_date"].year == today.year
                 # Datadis lags ~2 days, so a month is first stored while still incomplete.
-                # Also extend closed periods that now have later consumption inside the
-                # month (this repairs rows saved truncated by earlier versions too).
-                extended = p["end_date"] > existing_p["end_date"]
+                # Also extend a closed period when there is consumption after its saved
+                # end_date inside the month (this repairs rows saved truncated by earlier
+                # versions too). The new end is the last day WITH data, because
+                # calculate_bill() needs the period to match the first/last consumption day.
+                new_end = last_day_with_data.get((p["start_date"].year, p["start_date"].month), p["end_date"])
+                new_end = min(new_end, p["end_date"])
+                extended = new_end > existing_p["end_date"]
                 if is_current_month or extended:
                     if extended and not is_current_month:
                         _LOGGER.info(
                             "Billing period %s ended early (%s): extending to %s and recalculating",
-                            p["start_date"], existing_p["end_date"], p["end_date"],
+                            p["start_date"], existing_p["end_date"], new_end,
                         )
-                    existing_p["end_date"] = p["end_date"]
+                    existing_p["end_date"] = new_end
                     for field in _BILL_FIELDS:
                         existing_p.pop(field, None)
 
