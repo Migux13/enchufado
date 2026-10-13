@@ -15,6 +15,7 @@ Enchufado comparte con pvpc_energy la arquitectura, los IDs de estadísticas y l
 ## ¿Qué hace?
 
 - Descarga el consumo horario desde **Datadis** (compatible con e-distribución y otras distribuidoras)
+- Hace como máximo **una consulta de consumo al día** a Datadis (que rechaza con 429 una consulta idéntica durante 24 h), alternando el rango, y guarda todos los días completos que devuelve, sobrescribiendo las correcciones de estimado a real
 - Descarga los precios horarios **PVPC** desde ESIOS/REE
 - Crea estadísticas en el **panel de energía** de Home Assistant: consumo (kWh) y coste (€)
 - Simula facturas mensuales usando el comparador oficial de la CNMC y publica el resultado como estado `enchufado.current_bill`
