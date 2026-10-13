@@ -26,6 +26,7 @@ async def async_setup_entry(hass, entry) -> bool:
     _update_token_issue(hass, entry)
 
     await hass.async_add_executor_job(_ensure_data_dir)
+    await EnchufadoCoordinator.load_power_schedule(hass)
 
     unsub = entry.add_update_listener(options_update_listener)
     hass_data["unsub_options_update_listener"] = unsub

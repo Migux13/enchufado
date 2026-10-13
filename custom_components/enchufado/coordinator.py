@@ -42,6 +42,7 @@ from .const import (
     DEFAULT_BILLING_CYCLE_DAY,
     DATADIS_QUERIES_FILENAME,
     MAX_POWER_FILENAME,
+    POWER_SCHEDULE_FILENAME,
     SIGNAL_MAX_POWER,
     CONSUMPTION_STATISTIC_ID,
     CONSUMPTION_STATISTIC_NAME,
@@ -56,7 +57,7 @@ from .const import (
 )
 from . import tariffs
 from .datadis import Datadis
-from . import maxpower, quota
+from . import contracts, maxpower, quota
 from .ree import REE, ESIOSAuthError
 from .util import MADRID_TZ, madrid_timestamp
 
@@ -85,6 +86,8 @@ class EnchufadoCoordinator:
     total_cost_signature_file = None
     datadis_queries_file = None
     max_power_file = None
+    power_schedule_file = None
+    power_schedule = []
     max_power_history = {"checked": [], "months": {}}
 
     consumption_metadata = StatisticMetaData(
@@ -154,6 +157,9 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.datadis_queries_file = (
             f"{EnchufadoCoordinator.user_files_path}/{DATADIS_QUERIES_FILENAME}"
         )
+        EnchufadoCoordinator.power_schedule_file = (
+            f"{EnchufadoCoordinator.user_files_path}/{POWER_SCHEDULE_FILENAME}"
+        )
         EnchufadoCoordinator.max_power_file = f"{EnchufadoCoordinator.user_files_path}/{MAX_POWER_FILENAME}"
         EnchufadoCoordinator.billing_periods_file = (
             f"{EnchufadoCoordinator.user_files_path}/{BILLING_PERIODS_FILENAME}"
@@ -175,7 +181,65 @@ class EnchufadoCoordinator:
     @staticmethod
     def contracted_on(day):
         """(power_high, power_low) in force on ``day``."""
-        return EnchufadoCoordinator.power_high or 4.6, EnchufadoCoordinator.power_low or 4.6
+        return tariffs.powers_on(
+            day,
+            EnchufadoCoordinator.power_high or 4.6,
+            EnchufadoCoordinator.power_low or 4.6,
+            EnchufadoCoordinator.power_schedule,
+        )
+
+    @staticmethod
+    async def load_power_schedule(hass):
+        text = await hass.async_add_executor_job(
+            EnchufadoCoordinator._read_text, EnchufadoCoordinator.power_schedule_file
+        )
+        EnchufadoCoordinator.power_schedule = contracts.load(text)["rows"]
+
+    @staticmethod
+    async def update_contract(hass):
+        """Re-read the contracts once a day; True if the contracted power changed.
+
+        Keeps the table of contracted powers by date (so already computed hours keep the
+        power of their day) and, when the power in force differs from the entry's, updates
+        power_high/power_low in the entry, which reloads the integration.
+        """
+        today = datetime.datetime.now(MADRID_TZ).date()
+        text = await hass.async_add_executor_job(
+            EnchufadoCoordinator._read_text, EnchufadoCoordinator.power_schedule_file
+        )
+        stored = contracts.load(text)
+        EnchufadoCoordinator.power_schedule = stored["rows"]
+        if stored["checked"] == today:
+            return False
+
+        items = await Datadis.contracts()
+        if items is None:
+            return False
+        parsed = contracts.parse_contracts(items)
+        rows = contracts.update_schedule(stored["rows"], parsed, today)
+        await hass.async_add_executor_job(
+            EnchufadoCoordinator._write_text,
+            EnchufadoCoordinator.power_schedule_file,
+            contracts.dump(today, rows),
+        )
+        EnchufadoCoordinator.power_schedule = rows
+
+        in_force = contracts.in_force(parsed, today)
+        entry = EnchufadoCoordinator.config_entry
+        if in_force is None or entry is None:
+            return False
+        new = (in_force["high"], in_force["low"])
+        old = (EnchufadoCoordinator.power_high, EnchufadoCoordinator.power_low)
+        if new == old:
+            return False
+        _LOGGER.info(
+            "Contracted power changed: %s/%s kW -> %s/%s kW; updating the entry", *old, *new
+        )
+        # The entry's update listener reloads the integration, which runs a new import.
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_POWER_HIGH: new[0], CONF_POWER_LOW: new[1]}
+        )
+        return True
 
     @staticmethod
     async def load_max_power_history(hass):
@@ -233,6 +297,12 @@ class EnchufadoCoordinator:
     @staticmethod
     async def import_energy_data(hass, force_update=False):
         _LOGGER.debug("import_energy_data(force_update=%s)", force_update)
+        try:
+            if await EnchufadoCoordinator.update_contract(hass):
+                return  # the entry was updated and is reloading; the new import redoes this one
+        except Exception as err:  # never block the import on the contract query
+            _LOGGER.error("Contract update failed: %s", err)
+
         energy_file_exists = await hass.async_add_executor_job(exists, EnchufadoCoordinator.energy_file)
         _LOGGER.debug("energy_data path: %s (exists=%s)", EnchufadoCoordinator.energy_file, energy_file_exists)
 
@@ -427,7 +497,8 @@ class EnchufadoCoordinator:
         power_high = EnchufadoCoordinator.power_high or 4.6
         power_low = EnchufadoCoordinator.power_low or 4.6
         cycle_day = EnchufadoCoordinator.billing_cycle_day
-        signature = tariffs.signature(power_high, power_low, cycle_day)
+        schedule = EnchufadoCoordinator.power_schedule
+        signature = tariffs.signature(power_high, power_low, cycle_day, schedule)
         stored_signature = await hass.async_add_executor_job(
             EnchufadoCoordinator._read_text, EnchufadoCoordinator.total_cost_signature_file
         )
@@ -448,7 +519,7 @@ class EnchufadoCoordinator:
 
         last_ts = max(consumptions)
         rows = tariffs.create_total_cost_series(
-            first_ts, last_ts, consumptions, prices, power_high, power_low, day_cost, cycle_day
+            first_ts, last_ts, consumptions, prices, power_high, power_low, day_cost, cycle_day, schedule
         )
         if rows:
             stats = []

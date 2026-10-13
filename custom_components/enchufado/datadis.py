@@ -90,13 +90,13 @@ async def async_get_supplies(token: str, authorized_nif: str | None = None) -> l
     return supplies
 
 
-async def async_get_contract_detail(
+async def async_get_contracts(
     token: str,
     cups: str,
     distributor_code: str,
     authorized_nif: str | None = None,
-) -> dict | None:
-    """Return the most recent active contract for the given CUPS, or None."""
+) -> list | None:
+    """Return every contract in the get-contract-detail-v2 response, or None on failure."""
     params = {"cups": cups, "distributorCode": distributor_code}
     if authorized_nif:
         params["authorizedNif"] = authorized_nif
@@ -104,8 +104,20 @@ async def async_get_contract_detail(
     data, _ = await _request(token, _URL_CONTRACT, params)
     if not data:
         return None
-
+    if isinstance(data, dict) and data.get("distributorError"):
+        _LOGGER.warning("Datadis contract distributorError: %s", data["distributorError"])
     items = data.get("contract", data) if isinstance(data, dict) else data
+    return items if isinstance(items, list) else None
+
+
+async def async_get_contract_detail(
+    token: str,
+    cups: str,
+    distributor_code: str,
+    authorized_nif: str | None = None,
+) -> dict | None:
+    """Return the most recent active contract for the given CUPS, or None."""
+    items = await async_get_contracts(token, cups, distributor_code, authorized_nif)
     if not items:
         return None
 
@@ -235,3 +247,15 @@ class Datadis:
             _LOGGER.warning("Datadis max power distributorError: %s", errors)
         _LOGGER.info("Datadis: %d max power records (%s)", len(records), params["startDate"])
         return records, status
+
+    @staticmethod
+    async def contracts() -> list | None:
+        """Every contract of the supply (get-contract-detail-v2, no 24 h rule), or None."""
+        if not all([Datadis.cups, Datadis.distributor_code]):
+            return None
+        Datadis._token = None  # fresh login: this runs once a day
+        if not await Datadis._ensure_token():
+            return None
+        return await async_get_contracts(
+            Datadis._token, Datadis.cups, Datadis.distributor_code, Datadis.authorized_nif
+        )

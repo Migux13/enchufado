@@ -17,6 +17,7 @@ Enchufado comparte con pvpc_energy la arquitectura, los IDs de estadísticas y l
 - Descarga el consumo horario desde **Datadis** (compatible con e-distribución y otras distribuidoras)
 - Hace como máximo **una consulta de consumo al día** a Datadis (que rechaza con 429 una consulta idéntica durante 24 h), alternando el rango, y guarda todos los días completos que devuelve, sobrescribiendo las correcciones de estimado a real
 - Una vez al mes (a partir del día 3) consulta la **potencia máxima demandada** del mes cerrado y la expone en tres sensores, uno por periodo de energía (P1 punta, P2 llano, P3 valle), con la fecha y hora del máximo, los máximos de los últimos 12 meses y la potencia contratada correspondiente (P1 y P2 con la potencia punta, P3 con la valle). El histórico se guarda en `max_power.json`, junto a los demás ficheros de datos
+- Relee el contrato una vez al día. Si cambia la potencia contratada, actualiza la entrada sin reconfigurar y guarda una tabla de potencias por fechas (`power_schedule.json`): las horas ya calculadas del coste total conservan la potencia de su día
 - Descarga los precios horarios **PVPC** desde ESIOS/REE
 - Crea estadísticas en el **panel de energía** de Home Assistant: consumo (kWh) y coste (€)
 - Simula facturas mensuales usando el comparador oficial de la CNMC y publica el resultado como estado `enchufado.current_bill`
