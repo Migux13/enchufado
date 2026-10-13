@@ -4,6 +4,7 @@ import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import UnitOfPower
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
@@ -60,6 +61,9 @@ class EnchufadoMaxPowerSensor(SensorEntity):
         }
 
     async def async_added_to_hass(self) -> None:
+        # Without @callback the dispatcher runs this in the executor, and
+        # async_write_ha_state() must run in the event loop.
+        @callback
         def _on_update() -> None:
             self._refresh()
             self.async_write_ha_state()
