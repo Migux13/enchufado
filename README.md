@@ -50,6 +50,16 @@ El proceso de configuración tiene dos pasos:
 
 Se muestran los suministros encontrados en tu cuenta. Al seleccionar uno, la potencia contratada y el código postal se obtienen automáticamente desde Datadis.
 
+## Actualizar desde una versión < 0.3.0
+
+Desde la 0.3.0 el token de ESIOS-REE ya no va incluido en la integración: cada usuario aporta el suyo. Las entradas creadas antes no lo tienen, así que los precios PVPC dejan de actualizarse y la estadística `enchufado:cost` vale 0 € desde esa fecha.
+
+No hace falta borrar la integración:
+
+1. Pide tu token gratuito en [api.esios.ree.es](https://api.esios.ree.es/) (se solicita por email).
+2. Verás un aviso en **Ajustes → Reparaciones**. Ábrelo e introduce el token, o ve a **Ajustes → Dispositivos y servicios → Enchufado → ⋮ → Reconfigurar**.
+3. El token se comprueba contra ESIOS-REE, la integración se recarga y, al llegar los precios atrasados, la estadística de coste se regenera sola desde la primera hora afectada.
+
 ## Entidades creadas
 
 | Entidad | Tipo | Descripción |

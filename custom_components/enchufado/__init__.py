@@ -6,9 +6,10 @@ from os.path import exists
 from random import randint
 
 from homeassistant.const import Platform
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_change
 
-from .const import DOMAIN
+from .const import DOMAIN, ISSUE_MISSING_ESIOS_TOKEN
 from .coordinator import EnchufadoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ async def async_setup_entry(hass, entry) -> bool:
     _LOGGER.debug("async_setup_entry: entry_id=%s", entry.entry_id)
     hass_data = dict(entry.data)
     EnchufadoCoordinator.set_config(hass_data, hass)
+    _update_token_issue(hass, entry)
 
     await hass.async_add_executor_job(_ensure_data_dir)
 
@@ -32,6 +34,22 @@ async def async_setup_entry(hass, entry) -> bool:
     _setup_services(hass, entry)
     hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
     return True
+
+
+def _update_token_issue(hass, entry) -> None:
+    """Raise a repair while the entry has no ESIOS token, clear it once set."""
+    if EnchufadoCoordinator.esios_token:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_MISSING_ESIOS_TOKEN)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_MISSING_ESIOS_TOKEN,
+        is_fixable=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=ISSUE_MISSING_ESIOS_TOKEN,
+        data={"entry_id": entry.entry_id},
+    )
 
 
 def _ensure_data_dir():
@@ -62,6 +80,10 @@ def _setup_services(hass, entry) -> None:
 
 async def options_update_listener(hass, config_entry):
     await hass.config_entries.async_reload(config_entry.entry_id)
+
+
+async def async_remove_entry(hass, entry) -> None:
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_MISSING_ESIOS_TOKEN)
 
 
 async def async_unload_entry(hass, entry) -> bool:

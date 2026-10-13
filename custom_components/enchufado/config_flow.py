@@ -26,6 +26,7 @@ from .const import (
     DOMAIN,
 )
 from .datadis import async_get_contract_detail, async_get_supplies, async_login
+from .ree import validate_esios_token
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ _AUTH_SCHEMA = vol.Schema(
         vol.Required(CONF_ESIOS_TOKEN): cv.string,
     }
 )
+
+_RECONFIGURE_SCHEMA = vol.Schema({vol.Required(CONF_ESIOS_TOKEN): cv.string})
 
 
 class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -123,3 +126,22 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=cups_value, data=self.data)
 
         return self.async_show_form(step_id="cups", data_schema=cups_schema, errors=errors)
+
+    async def async_step_reconfigure(self, user_input: Optional[Dict[str, Any]] = None):
+        """Add or change the ESIOS token of an existing entry."""
+        entry = self._get_reconfigure_entry()
+        errors = {}
+        if user_input is not None:
+            esios_token = user_input[CONF_ESIOS_TOKEN].strip()
+            error = await validate_esios_token(esios_token)
+            if error is None:
+                # The entry's update listener reloads the integration.
+                self.hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_ESIOS_TOKEN: esios_token}
+                )
+                return self.async_abort(reason="reconfigure_successful")
+            errors["base"] = error
+
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=_RECONFIGURE_SCHEMA, errors=errors
+        )

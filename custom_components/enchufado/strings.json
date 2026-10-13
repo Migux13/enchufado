@@ -20,14 +20,50 @@
         "data": {
           "cups": "CUPS"
         }
+      },
+      "reconfigure": {
+        "title": "Token API ESIOS-REE",
+        "description": "Añade o cambia el token personal de la API de ESIOS-REE. Se comprobará antes de guardarlo.",
+        "data": {
+          "esios_token": "Token API ESIOS-REE"
+        },
+        "data_description": {
+          "esios_token": "Token personal gratuito, necesario para obtener el precio PVPC. Se solicita por email a ESIOS-REE."
+        }
       }
     },
     "error": {
       "cannot_connect": "No se pudo conectar a Datadis. Verifica usuario y contraseña.",
-      "no_supplies": "No se encontraron suministros para esta cuenta."
+      "no_supplies": "No se encontraron suministros para esta cuenta.",
+      "invalid_esios_token": "ESIOS-REE ha rechazado el token. Comprueba que lo has copiado completo.",
+      "cannot_connect_esios": "No se pudo conectar a ESIOS-REE para validar el token. Inténtalo de nuevo más tarde."
     },
     "abort": {
-      "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros."
+      "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros.",
+      "reconfigure_successful": "Token de ESIOS-REE actualizado. La integración se está recargando."
+    }
+  },
+  "issues": {
+    "missing_esios_token": {
+      "title": "Falta el token de ESIOS-REE",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Falta el token de ESIOS-REE",
+            "description": "Desde la versión 0.3.0 Enchufado necesita un token personal de ESIOS-REE para descargar los precios PVPC. Sin él, el coste de la energía se calcula con precio 0. Introdúcelo aquí (o en Reconfigurar, en la página de la integración) y los precios atrasados se rellenarán automáticamente.",
+            "data": {
+              "esios_token": "Token API ESIOS-REE"
+            }
+          }
+        },
+        "error": {
+          "invalid_esios_token": "ESIOS-REE ha rechazado el token. Comprueba que lo has copiado completo.",
+          "cannot_connect_esios": "No se pudo conectar a ESIOS-REE para validar el token. Inténtalo de nuevo más tarde."
+        },
+        "abort": {
+          "entry_not_found": "No se encontró la entrada de configuración de Enchufado."
+        }
+      }
     }
   }
 }
