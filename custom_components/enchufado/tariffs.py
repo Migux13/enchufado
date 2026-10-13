@@ -87,9 +87,9 @@ _TABLES = {
 }
 
 
-def signature(power_high, power_low):
+def signature(power_high, power_low, cycle_day=1):
     """Hash of everything the statistic depends on besides consumption and prices."""
-    payload = json.dumps([_TABLES, power_high, power_low], sort_keys=True, default=str)
+    payload = json.dumps([_TABLES, power_high, power_low, cycle_day], sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -101,6 +101,18 @@ def rate_on(table, day):
             break
         value = row_value
     return value
+
+
+def cycle_last_day(day, cycle_day=1):
+    """Last day of the billing cycle containing ``day``.
+
+    Cycles start on ``cycle_day`` (1-28) of every month; 1 means calendar months.
+    """
+    if day.day >= cycle_day:
+        year, month = (day.year + 1, 1) if day.month == 12 else (day.year, day.month + 1)
+    else:
+        year, month = day.year, day.month
+    return D(year, month, cycle_day) - datetime.timedelta(days=1)
 
 
 def vat_on(day, power_high, power_low):
@@ -116,14 +128,19 @@ def daily_power_eur(day, power_high, power_low):
     return yearly / DAYS_PER_YEAR
 
 
-def hour_cost(day, hours_in_day, energy_eur, power_high, power_low):
-    """Cost breakdown (EUR) of one hour: energy + prorated fixed terms + taxes."""
+def hour_cost(day, hours_in_day, energy_eur, power_high, power_low, tax_day=None):
+    """Cost breakdown (EUR) of one hour: energy + prorated fixed terms + taxes.
+
+    Peajes, bono social and meter use the rates of ``day``; IEE and IVA those of
+    ``tax_day`` (the invoice date, see ``cycle_last_day``), which defaults to ``day``.
+    """
+    tax_day = tax_day or day
     power = daily_power_eur(day, power_high, power_low) / hours_in_day
     bono = rate_on(BONO_SOCIAL, day) / hours_in_day
     meter = rate_on(METER_RENTAL, day) / hours_in_day
     iee_base = energy_eur + power + bono
-    iee = iee_base * rate_on(IEE_RATE, day)
-    vat = (iee_base + iee + meter) * vat_on(day, power_high, power_low)
+    iee = iee_base * rate_on(IEE_RATE, tax_day)
+    vat = (iee_base + iee + meter) * vat_on(tax_day, power_high, power_low)
     return {
         "energy": energy_eur,
         "power": power,
@@ -143,17 +160,20 @@ def hours_in_day(day):
 
 
 def create_total_cost_series(first_ts, last_ts, consumptions, prices, power_high, power_low,
-                             day_cost=0.0):
+                             day_cost=0.0, cycle_day=1):
     """Hourly (timestamp, hour_cost, day_to_date_cost) rows for first_ts..last_ts.
 
     ``consumptions`` maps timestamp -> {"value": kWh}; missing hours count as 0 kWh (the
     fixed terms are still charged), missing prices as 0. Hours before TABLES_START are
     skipped. ``day_cost`` seeds the day-to-date state when resuming in the middle of a day.
+    IVA and IEE use the rates in force on the last day of the billing cycle (starting on
+    ``cycle_day``) that contains the hour, as they accrue on the invoice date.
     """
     rows = []
     timestamp = first_ts
     cache_day = None
     n_hours = 24
+    tax_day = None
     while timestamp <= last_ts:
         local = datetime.datetime.fromtimestamp(timestamp, MADRID_TZ)
         day = local.date()
@@ -161,9 +181,10 @@ def create_total_cost_series(first_ts, last_ts, consumptions, prices, power_high
             if day != cache_day:
                 cache_day = day
                 n_hours = hours_in_day(day)
+                tax_day = cycle_last_day(day, cycle_day)
             c = consumptions.get(timestamp)
             energy = (c["value"] if c else 0.0) * prices.get(timestamp, 0.0)
-            cost = hour_cost(day, n_hours, energy, power_high, power_low)["total"]
+            cost = hour_cost(day, n_hours, energy, power_high, power_low, tax_day)["total"]
             day_cost = cost if local.hour == 0 else day_cost + cost
             rows.append((timestamp, cost, day_cost))
         timestamp += 3600

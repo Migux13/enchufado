@@ -12,6 +12,8 @@ CONF_POWER_HIGH = "power_high"
 CONF_POWER_LOW = "power_low"
 CONF_ZIP_CODE = "zip_code"
 CONF_ESIOS_TOKEN = "esios_token"
+CONF_BILLING_CYCLE_DAY = "billing_cycle_day"
+DEFAULT_BILLING_CYCLE_DAY = 1
 
 # Repair issues
 ISSUE_MISSING_ESIOS_TOKEN = "missing_esios_token"

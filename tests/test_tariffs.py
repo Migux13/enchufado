@@ -108,3 +108,63 @@ def test_hours_before_the_tables_are_skipped():
 def test_signature_changes_with_power():
     assert tariffs.signature(5.5, 5.5) == tariffs.signature(5.5, 5.5)
     assert tariffs.signature(5.5, 5.5) != tariffs.signature(4.6, 4.6)
+
+
+@pytest.mark.parametrize(
+    "day,cycle_day,last",
+    [
+        (D(2026, 3, 5), 5, D(2026, 4, 4)),
+        (D(2026, 3, 4), 5, D(2026, 3, 4)),
+        (D(2026, 12, 20), 5, D(2027, 1, 4)),
+        (D(2026, 5, 17), 1, D(2026, 5, 31)),
+        (D(2026, 2, 28), 28, D(2026, 3, 27)),
+    ],
+)
+def test_cycle_last_day(day, cycle_day, last):
+    assert tariffs.cycle_last_day(day, cycle_day) == last
+
+
+def _tax_rates(day, cycle_day):
+    """(IEE, IVA) rates actually applied to a 00:00 hour of ``day`` with zero consumption."""
+    ts = int(datetime.datetime.combine(day, datetime.time(), tariffs.MADRID_TZ).timestamp())
+    (row,) = tariffs.create_total_cost_series(ts, ts, {}, {}, 5.5, 5.5, cycle_day=cycle_day)
+    n = tariffs.hours_in_day(day)
+    base = (
+        tariffs.daily_power_eur(day, 5.5, 5.5) + tariffs.rate_on(tariffs.BONO_SOCIAL, day)
+    ) / n
+    meter = tariffs.rate_on(tariffs.METER_RENTAL, day) / n
+    # total = base * (1 + iee) * (1 + vat) + meter * (1 + vat); both unknown, so test the pair
+    for iee in (0.0511269632, 0.005):
+        for vat in (0.21, 0.10):
+            if row[1] == pytest.approx((base * (1 + iee) + meter) * (1 + vat)):
+                return iee, vat
+    raise AssertionError(f"unexpected total {row[1]}")
+
+
+# Three invoices of the 2026 tax transition, billing cycle starting on day 5: each one is
+# taxed entirely at the rates of its last day, whatever the day of consumption.
+CYCLE_5 = [
+    pytest.param(D(2026, 3, 5), D(2026, 4, 4), (0.005, 0.10), id="05-03_to_04-04_reduced"),
+    pytest.param(D(2026, 4, 5), D(2026, 5, 4), (0.005, 0.10), id="05-04_to_04-05_reduced"),
+    pytest.param(D(2026, 5, 5), D(2026, 6, 4), (0.0511269632, 0.21), id="05-05_to_04-06_standard"),
+]
+
+
+@pytest.mark.parametrize("first,last,expected", CYCLE_5)
+def test_cycle_taxes_apply_to_the_whole_invoice(first, last, expected):
+    day = first
+    while day <= last:
+        assert _tax_rates(day, 5) == expected, day
+        day += datetime.timedelta(days=1)
+
+
+def test_calendar_month_cycle_uses_the_rates_of_the_month_end():
+    # cycle_day=1: a calendar month is taxed at the rates in force on its last day
+    assert _tax_rates(D(2026, 3, 10), 1) == (0.005, 0.10)
+    assert _tax_rates(D(2026, 5, 31), 1) == (0.005, 0.10)
+    assert _tax_rates(D(2026, 6, 1), 1) == (0.0511269632, 0.21)
+
+
+def test_signature_changes_with_cycle_day():
+    assert tariffs.signature(5.5, 5.5, 5) != tariffs.signature(5.5, 5.5, 1)
+    assert tariffs.signature(5.5, 5.5) == tariffs.signature(5.5, 5.5, 1)

@@ -27,6 +27,7 @@ from .const import (
     BILL_STATISTIC_ID,
     BILL_STATISTIC_NAME,
     CONF_AUTHORIZED_NIF,
+    CONF_BILLING_CYCLE_DAY,
     CONF_CUPS,
     CONF_DATADIS_PASSWORD,
     CONF_DATADIS_USER,
@@ -36,6 +37,7 @@ from .const import (
     CONF_POWER_HIGH,
     CONF_POWER_LOW,
     CONF_ZIP_CODE,
+    DEFAULT_BILLING_CYCLE_DAY,
     CONSUMPTION_STATISTIC_ID,
     CONSUMPTION_STATISTIC_NAME,
     COST_STATISTIC_ID,
@@ -65,6 +67,7 @@ class EnchufadoCoordinator:
     authorized_nif = None
     power_high = None
     power_low = None
+    billing_cycle_day = DEFAULT_BILLING_CYCLE_DAY
     zip_code = None
     esios_token = None
     user_files_path = None
@@ -124,6 +127,9 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.power_high = config.get(CONF_POWER_HIGH, 4.6)
         EnchufadoCoordinator.power_low = config.get(CONF_POWER_LOW, 4.6)
         EnchufadoCoordinator.zip_code = config.get(CONF_ZIP_CODE, "")
+        EnchufadoCoordinator.billing_cycle_day = int(
+            config.get(CONF_BILLING_CYCLE_DAY) or DEFAULT_BILLING_CYCLE_DAY
+        )
         EnchufadoCoordinator.esios_token = config.get(CONF_ESIOS_TOKEN)
         if not EnchufadoCoordinator.esios_token:
             _LOGGER.warning(
@@ -327,7 +333,8 @@ class EnchufadoCoordinator:
             return
         power_high = EnchufadoCoordinator.power_high or 4.6
         power_low = EnchufadoCoordinator.power_low or 4.6
-        signature = tariffs.signature(power_high, power_low)
+        cycle_day = EnchufadoCoordinator.billing_cycle_day
+        signature = tariffs.signature(power_high, power_low, cycle_day)
         stored_signature = await hass.async_add_executor_job(
             EnchufadoCoordinator._read_text, EnchufadoCoordinator.total_cost_signature_file
         )
@@ -348,7 +355,7 @@ class EnchufadoCoordinator:
 
         last_ts = max(consumptions)
         rows = tariffs.create_total_cost_series(
-            first_ts, last_ts, consumptions, prices, power_high, power_low, day_cost
+            first_ts, last_ts, consumptions, prices, power_high, power_low, day_cost, cycle_day
         )
         if rows:
             stats = []
@@ -376,6 +383,7 @@ class EnchufadoCoordinator:
             prices,
             period["power_high"],
             period["power_low"],
+            cycle_day=EnchufadoCoordinator.billing_cycle_day,
         )
         local = sum(cost for _, cost, _ in rows)
         _LOGGER.debug(

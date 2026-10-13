@@ -19,7 +19,8 @@ PLATFORMS = [Platform.NUMBER]
 
 async def async_setup_entry(hass, entry) -> bool:
     _LOGGER.debug("async_setup_entry: entry_id=%s", entry.entry_id)
-    hass_data = dict(entry.data)
+    # Options (billing cycle day) take precedence over the data given at setup.
+    hass_data = {**entry.data, **entry.options}
     EnchufadoCoordinator.set_config(hass_data, hass)
     _update_token_issue(hass, entry)
 

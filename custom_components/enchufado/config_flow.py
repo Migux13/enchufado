@@ -10,10 +10,12 @@ from typing import Any, Dict, Optional
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 
 from .const import (
     CONF_AUTHORIZED_NIF,
+    CONF_BILLING_CYCLE_DAY,
     CONF_CUPS,
     CONF_DATADIS_PASSWORD,
     CONF_DATADIS_USER,
@@ -23,6 +25,7 @@ from .const import (
     CONF_POWER_HIGH,
     CONF_POWER_LOW,
     CONF_ZIP_CODE,
+    DEFAULT_BILLING_CYCLE_DAY,
     DOMAIN,
 )
 from .datadis import async_get_contract_detail, async_get_supplies, async_login
@@ -39,10 +42,19 @@ _AUTH_SCHEMA = vol.Schema(
     }
 )
 
+_CYCLE_DAY_SELECTOR = selector(
+    {"number": {"min": 1, "max": 28, "step": 1, "mode": "box"}}
+)
+
 _RECONFIGURE_SCHEMA = vol.Schema({vol.Required(CONF_ESIOS_TOKEN): cv.string})
 
 
 class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return EnchufadoOptionsFlow()
+
     _supplies: list = []
     _token: str = None
     data: Dict[str, Any] = {}
@@ -80,7 +92,12 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             f"{s['cups']} ({s['distributor_name']})" for s in self._supplies
         ]
         cups_schema = vol.Schema(
-            {vol.Required(CONF_CUPS): selector({"select": {"options": cups_options}})}
+            {
+                vol.Required(CONF_CUPS): selector({"select": {"options": cups_options}}),
+                vol.Optional(
+                    CONF_BILLING_CYCLE_DAY, default=DEFAULT_BILLING_CYCLE_DAY
+                ): _CYCLE_DAY_SELECTOR,
+            }
         )
 
         errors = {}
@@ -121,6 +138,9 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_POWER_HIGH: power_high,
                     CONF_POWER_LOW: power_low,
                     CONF_ZIP_CODE: supply.get("postal_code") or "",
+                    CONF_BILLING_CYCLE_DAY: int(
+                        user_input.get(CONF_BILLING_CYCLE_DAY) or DEFAULT_BILLING_CYCLE_DAY
+                    ),
                 }
             )
             return self.async_create_entry(title=cups_value, data=self.data)
@@ -145,3 +165,21 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reconfigure", data_schema=_RECONFIGURE_SCHEMA, errors=errors
         )
+
+
+class EnchufadoOptionsFlow(config_entries.OptionsFlow):
+    """Edit the billing cycle day after setup (Datadis does not publish it)."""
+
+    async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
+        if user_input is not None:
+            day = int(user_input[CONF_BILLING_CYCLE_DAY])
+            return self.async_create_entry(data={CONF_BILLING_CYCLE_DAY: day})
+
+        current = self.config_entry.options.get(
+            CONF_BILLING_CYCLE_DAY,
+            self.config_entry.data.get(CONF_BILLING_CYCLE_DAY, DEFAULT_BILLING_CYCLE_DAY),
+        )
+        schema = vol.Schema(
+            {vol.Required(CONF_BILLING_CYCLE_DAY, default=int(current)): _CYCLE_DAY_SELECTOR}
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)
