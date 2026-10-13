@@ -222,7 +222,8 @@ class EnchufadoCoordinator:
             else:
                 _LOGGER.info("Datadis consumption query: %s → %s", query[0], query[1])
                 new_consumptions, status = await Datadis.consumptions(*query)
-                if status is not None:  # a response came back, so Datadis counted the query
+                # Recorded once Datadis answered, except 401 (rejected before it counted as a query)
+                if status is not None and status != 401:
                     queries = quota.record(queries, query, now)
                     await hass.async_add_executor_job(
                         EnchufadoCoordinator._write_text,
@@ -333,7 +334,7 @@ class EnchufadoCoordinator:
 
         # --- Total cost (energy + fixed terms + taxes) ---
         await EnchufadoCoordinator.update_total_cost_statistics(
-            hass, consumptions, prices, force_update, price_keys_before
+            hass, consumptions, prices, force_update or consumption_corrected, price_keys_before
         )
 
         # --- Billing simulation via CNMC ---

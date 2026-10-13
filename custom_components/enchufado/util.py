@@ -1,6 +1,9 @@
 """Shared helpers for Enchufado integration."""
 import datetime
+import logging
 from zoneinfo import ZoneInfo
+
+_LOGGER = logging.getLogger(__name__)
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
@@ -28,9 +31,12 @@ def hours_in_day(day: datetime.date) -> int:
 def parse_consumption_days(records) -> dict:
     """Hourly consumption of every complete day in a Datadis response.
 
-    A day is complete when it has one record per hour (23, 24 or 25 on a DST change),
-    numbered "01:00".."N:00". Incomplete days and malformed records are dropped. The
-    requested range is not applied: whatever complete days Datadis returns are kept.
+    A day is complete when it has as many records as hours in that day (23, 24 or 25 on a
+    DST change). The records are assigned to the day's hours in order (stable sort by the
+    "HH:00" label, which is the response order if it is chronological), so it does not
+    matter how Datadis numbers the repeated or missing hour of a DST day. Incomplete days
+    and malformed records are dropped. The requested range is not applied: whatever
+    complete days Datadis returns are kept.
     Returns {unix_timestamp: {"value": kwh, "reading_type": "R"|"E"}}.
     """
     days = {}
@@ -42,13 +48,18 @@ def parse_consumption_days(records) -> dict:
         except (KeyError, ValueError, TypeError, AttributeError):
             continue
         reading_type = "R" if item.get("obtainMethod") == "Real" else "E"
-        days.setdefault(day, {})[hour] = (value, reading_type)
+        days.setdefault(day, []).append((hour, value, reading_type))
 
     result = {}
-    for day, hours in days.items():
-        if sorted(hours) != list(range(1, hours_in_day(day) + 1)):
+    for day, rows in days.items():
+        expected = hours_in_day(day)
+        if len(rows) != expected:
+            if expected != 24:
+                _LOGGER.warning(
+                    "Datadis: DST day %s has %d records, expected %d; day skipped", day, len(rows), expected
+                )
             continue
         midnight = madrid_timestamp(day)
-        for hour, (value, reading_type) in hours.items():
-            result[midnight + 3600 * (hour - 1)] = {"value": value, "reading_type": reading_type}
+        for index, (_, value, reading_type) in enumerate(sorted(rows, key=lambda r: r[0])):
+            result[midnight + 3600 * index] = {"value": value, "reading_type": reading_type}
     return result

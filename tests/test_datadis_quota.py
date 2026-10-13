@@ -122,10 +122,39 @@ def test_parse_keeps_complete_days_outside_any_requested_range():
 
 
 @pytest.mark.parametrize("day,hours", [(D(2026, 3, 29), 23), (D(2026, 10, 25), 25)])
-def test_parse_accepts_dst_days(day, hours):
+def test_parse_accepts_dst_days_numbered_1_to_n(day, hours):
     out = util.parse_consumption_days(_day(day, hours))
     assert len(out) == hours
     assert max(out) - min(out) == 3600 * (hours - 1)
+
+
+def _labelled(day, labels):
+    # consumption = position, to check that records are assigned in order
+    return [
+        {"date": day.strftime("%Y/%m/%d"), "time": f"{h:02d}:00", "consumptionKWh": i, "obtainMethod": "Real"}
+        for i, h in enumerate(labels)
+    ]
+
+
+def test_parse_23_hour_day_with_the_skipped_hour_in_the_labels():
+    day = D(2026, 3, 29)  # wall-clock labels: 02:00-03:00 does not exist -> 03:00 label is missing
+    out = util.parse_consumption_days(_labelled(day, [1, 2, 4] + list(range(5, 25))))
+    midnight = util.madrid_timestamp(day)
+    assert sorted(out) == [midnight + 3600 * i for i in range(23)]
+    assert [out[ts]["value"] for ts in sorted(out)] == list(range(23))
+
+
+def test_parse_25_hour_day_with_a_repeated_label_keeps_every_record():
+    day = D(2026, 10, 25)  # the 02:00-03:00 hour happens twice -> "03:00" label repeated
+    out = util.parse_consumption_days(_labelled(day, [1, 2, 3, 3] + list(range(4, 25))))
+    midnight = util.madrid_timestamp(day)
+    assert sorted(out) == [midnight + 3600 * i for i in range(25)]
+    assert [out[ts]["value"] for ts in sorted(out)] == list(range(25))
+
+
+def test_parse_dst_day_with_the_wrong_record_count_is_dropped():
+    assert util.parse_consumption_days(_day(D(2026, 10, 25), 24)) == {}
+    assert util.parse_consumption_days(_day(D(2026, 3, 29), 24)) == {}
 
 
 def test_parse_drops_incomplete_days_and_bad_records():

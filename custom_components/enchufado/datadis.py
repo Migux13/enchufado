@@ -154,7 +154,7 @@ class Datadis:
         Returns (records, status): ``records`` maps unix_timestamp (Madrid local) to
         {'value': kwh, 'reading_type': 'R'|'E'} for every complete day in the response
         (see parse_consumption_days), ``status`` is the HTTP status, or None if no
-        response was received (the query is then not considered sent).
+        response was received (the query is then not considered sent; neither is a 401).
 
         Never retried: Datadis answers 429 to an identical query for 24 h, so a failure
         (429 included) is logged and the caller waits for the next daily run.
@@ -163,6 +163,9 @@ class Datadis:
             _LOGGER.error("Datadis not configured — call Datadis.setup() first")
             return {}, None
 
+        # Fresh login right before the query: with one query a day a cached token has
+        # normally expired, and a 401 here would lose the day.
+        Datadis._token = None
         if not await Datadis._ensure_token():
             return {}, None
 
@@ -179,7 +182,7 @@ class Datadis:
 
         data, status = await _request(Datadis._token, _URL_CONSUMPTION, params)
         if status == 401:
-            Datadis._token = None  # next run logs in again
+            Datadis._token = None  # not retried and not recorded as sent (see the coordinator)
         if status == 429:
             _LOGGER.warning("Datadis consumption query %s→%s rejected (429); waiting for tomorrow",
                             params["startDate"], params["endDate"])
