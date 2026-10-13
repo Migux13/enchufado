@@ -10,6 +10,10 @@ import logging
 _LOGGER = logging.getLogger(__name__)
 
 
+class ESIOSAuthError(Exception):
+    """ESIOS rejected the API token (HTTP 401/403)."""
+
+
 class REE:
     _url = "https://api.esios.ree.es/indicators/1001?geo_ids[]=8741&start_date={start_date}&end_date={end_date}"
 
@@ -32,6 +36,8 @@ class REE:
         response = None
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=REE._headers(token)) as resp:
+                if resp.status in (401, 403):
+                    raise ESIOSAuthError(f"ESIOS rejected the token (HTTP {resp.status})")
                 if resp.status == 200:
                     response = await resp.json()
 

@@ -21,6 +21,7 @@ async def async_setup_entry(hass, entry) -> bool:
     _LOGGER.debug("async_setup_entry: entry_id=%s", entry.entry_id)
     hass_data = dict(entry.data)
     EnchufadoCoordinator.set_config(hass_data, hass)
+    EnchufadoCoordinator.config_entry = entry
     _update_token_issue(hass, entry)
 
     await hass.async_add_executor_job(_ensure_data_dir)

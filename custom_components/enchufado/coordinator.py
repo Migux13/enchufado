@@ -45,7 +45,7 @@ from .const import (
     ENERGY_FILENAME,
 )
 from .datadis import Datadis
-from .ree import REE
+from .ree import REE, ESIOSAuthError
 from .util import MADRID_TZ, madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ class EnchufadoCoordinator:
     power_low = None
     zip_code = None
     esios_token = None
+    config_entry = None
     user_files_path = None
     energy_file = None
     billing_periods_file = None
@@ -195,12 +196,17 @@ class EnchufadoCoordinator:
         old_price_timestamps = set(prices)
         if EnchufadoCoordinator.esios_token:
             ree_pvpc = partial(REE.pvpc, token=EnchufadoCoordinator.esios_token)
-            if force_update or first_price_date is None or first_price_date > start_date:
-                await EnchufadoCoordinator.get_data(ree_pvpc, start_date, end_date, prices, 28, force_update)
-            elif end_date > last_price_date:
-                await EnchufadoCoordinator.get_data(
-                    ree_pvpc, last_price_date + datetime.timedelta(days=1), end_date, prices, 28
-                )
+            try:
+                if force_update or first_price_date is None or first_price_date > start_date:
+                    await EnchufadoCoordinator.get_data(ree_pvpc, start_date, end_date, prices, 28, force_update)
+                elif end_date > last_price_date:
+                    await EnchufadoCoordinator.get_data(
+                        ree_pvpc, last_price_date + datetime.timedelta(days=1), end_date, prices, 28
+                    )
+            except ESIOSAuthError as err:
+                _LOGGER.warning("%s: asking for a new ESIOS token", err)
+                if EnchufadoCoordinator.config_entry is not None:
+                    EnchufadoCoordinator.config_entry.async_start_reauth(hass)
 
         # --- Save and update statistics if data changed ---
         if force_update or len(consumptions) > consumptions_len or len(prices) > prices_len:
