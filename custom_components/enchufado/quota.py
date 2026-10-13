@@ -1,8 +1,10 @@
-"""Daily quota of Datadis consumption queries.
+"""Quota of Datadis queries that reject identical requests for 24 h.
 
 get-consumption-data-v2 only takes months (YYYY/MM) and answers 429 to an identical query
 for 24 h. This module decides which single query to send each day and keeps a log of sent
 queries so that none repeats within the lock window, not even across restarts or reloads.
+Each log entry carries the endpoint it was sent to; every endpoint has its own quota, so
+a consumption query never blocks a max-power one.
 
 No Home Assistant imports, so it can be unit-tested on its own.
 """
@@ -11,6 +13,9 @@ import json
 
 QUERY_LOCK = datetime.timedelta(hours=24, minutes=10)
 _KEEP = datetime.timedelta(days=3)
+
+CONSUMPTION = "consumption"
+MAX_POWER = "max_power"
 
 
 def month_start(day):
@@ -21,11 +26,33 @@ def previous_month(first):
     return (first - datetime.timedelta(days=1)).replace(day=1)
 
 
-def is_blocked(query, log, now):
-    """True if an identical query (start, end) was sent within the lock window."""
+def _of(log, endpoint):
+    # entries written before endpoints existed were consumption queries
+    return [e for e in log if e.get("endpoint", CONSUMPTION) == endpoint]
+
+
+def is_blocked(query, log, now, endpoint=CONSUMPTION):
+    """True if an identical query (start, end) was sent to ``endpoint`` within the lock window."""
     return any(
-        (e["start"], e["end"]) == query and now - e["sent_at"] < QUERY_LOCK for e in log
+        (e["start"], e["end"]) == query and now - e["sent_at"] < QUERY_LOCK
+        for e in _of(log, endpoint)
     )
+
+
+def plan_max_power(today, log, now, done_months=()):
+    """Month (as a (first, first) query) of max-power data to ask for, or None.
+
+    Once a month, from day 3, for the closed previous month. ``done_months`` are the
+    months already answered (first day of each); the lock window still applies, so a
+    failed query is retried at most once a day.
+    """
+    if today.day < 3:
+        return None
+    month = previous_month(month_start(today))
+    if month in done_months:
+        return None
+    query = (month, month)
+    return None if is_blocked(query, log, now, MAX_POWER) else query
 
 
 def plan_query(today, log, now, last_stored_day=None, window_start=None, force=False):
@@ -42,6 +69,7 @@ def plan_query(today, log, now, last_stored_day=None, window_start=None, force=F
     """
     current = month_start(today)
     previous = previous_month(current)
+    log = _of(log, CONSUMPTION)
     sent_today = any(e["sent_at"].date() == now.date() for e in log)
     if sent_today and not force:
         return None
@@ -70,7 +98,12 @@ def plan_query(today, log, now, last_stored_day=None, window_start=None, force=F
 def dump(log):
     return json.dumps(
         [
-            {"start": e["start"].isoformat(), "end": e["end"].isoformat(), "sent_at": e["sent_at"].isoformat()}
+            {
+                "endpoint": e.get("endpoint", CONSUMPTION),
+                "start": e["start"].isoformat(),
+                "end": e["end"].isoformat(),
+                "sent_at": e["sent_at"].isoformat(),
+            }
             for e in log
         ]
     )
@@ -83,6 +116,7 @@ def load(text):
     try:
         return [
             {
+                "endpoint": e.get("endpoint", CONSUMPTION),
                 "start": datetime.date.fromisoformat(e["start"]),
                 "end": datetime.date.fromisoformat(e["end"]),
                 "sent_at": datetime.datetime.fromisoformat(e["sent_at"]),
@@ -93,8 +127,8 @@ def load(text):
         return []
 
 
-def record(log, query, now):
+def record(log, query, now, endpoint=CONSUMPTION):
     """Log with ``query`` added and old entries dropped."""
     kept = [e for e in log if now - e["sent_at"] < _KEEP]
-    kept.append({"start": query[0], "end": query[1], "sent_at": now})
+    kept.append({"endpoint": endpoint, "start": query[0], "end": query[1], "sent_at": now})
     return kept

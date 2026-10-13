@@ -21,6 +21,7 @@ from homeassistant.const import CURRENCY_EURO, UnitOfEnergy
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .cnmc import CNMCUnavailable, calculate_bill
 from .const import (
@@ -40,6 +41,8 @@ from .const import (
     CONF_ZIP_CODE,
     DEFAULT_BILLING_CYCLE_DAY,
     DATADIS_QUERIES_FILENAME,
+    MAX_POWER_FILENAME,
+    SIGNAL_MAX_POWER,
     CONSUMPTION_STATISTIC_ID,
     CONSUMPTION_STATISTIC_NAME,
     COST_STATISTIC_ID,
@@ -53,7 +56,7 @@ from .const import (
 )
 from . import tariffs
 from .datadis import Datadis
-from . import quota
+from . import maxpower, quota
 from .ree import REE, ESIOSAuthError
 from .util import MADRID_TZ, madrid_timestamp
 
@@ -81,6 +84,8 @@ class EnchufadoCoordinator:
     billing_periods_file = None
     total_cost_signature_file = None
     datadis_queries_file = None
+    max_power_file = None
+    max_power_history = {"checked": [], "months": {}}
 
     consumption_metadata = StatisticMetaData(
         name=CONSUMPTION_STATISTIC_NAME,
@@ -149,6 +154,7 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.datadis_queries_file = (
             f"{EnchufadoCoordinator.user_files_path}/{DATADIS_QUERIES_FILENAME}"
         )
+        EnchufadoCoordinator.max_power_file = f"{EnchufadoCoordinator.user_files_path}/{MAX_POWER_FILENAME}"
         EnchufadoCoordinator.billing_periods_file = (
             f"{EnchufadoCoordinator.user_files_path}/{BILLING_PERIODS_FILENAME}"
         )
@@ -165,6 +171,52 @@ class EnchufadoCoordinator:
             point_type=config[CONF_POINT_TYPE],
             authorized_nif=config.get(CONF_AUTHORIZED_NIF),
         )
+
+    @staticmethod
+    def contracted_on(day):
+        """(power_high, power_low) in force on ``day``."""
+        return EnchufadoCoordinator.power_high or 4.6, EnchufadoCoordinator.power_low or 4.6
+
+    @staticmethod
+    async def load_max_power_history(hass):
+        text = await hass.async_add_executor_job(
+            EnchufadoCoordinator._read_text, EnchufadoCoordinator.max_power_file
+        )
+        EnchufadoCoordinator.max_power_history = maxpower.load(text)
+
+    @staticmethod
+    async def update_max_power(hass):
+        """Once a month (from day 3) ask Datadis for the closed previous month and store it."""
+        async with EnchufadoCoordinator._datadis_lock:
+            now = datetime.datetime.now(MADRID_TZ)
+            queries = quota.load(
+                await hass.async_add_executor_job(
+                    EnchufadoCoordinator._read_text, EnchufadoCoordinator.datadis_queries_file
+                )
+            )
+            history = EnchufadoCoordinator.max_power_history
+            query = quota.plan_max_power(now.date(), queries, now, maxpower.done_months(history))
+            if query is None:
+                return
+            _LOGGER.info("Datadis max power query: %s", query[0].strftime("%Y/%m"))
+            records, status = await Datadis.max_power(query[0])
+            if status is not None and status != 401:
+                queries = quota.record(queries, query, now, quota.MAX_POWER)
+                await hass.async_add_executor_job(
+                    EnchufadoCoordinator._write_text,
+                    EnchufadoCoordinator.datadis_queries_file,
+                    quota.dump(queries),
+                )
+            if status != 200:
+                return
+            history = maxpower.merge(history, query[0], records)
+            await hass.async_add_executor_job(
+                EnchufadoCoordinator._write_text,
+                EnchufadoCoordinator.max_power_file,
+                maxpower.dump(history),
+            )
+            EnchufadoCoordinator.max_power_history = history
+        async_dispatcher_send(hass, SIGNAL_MAX_POWER)
 
     @staticmethod
     async def reprocess_energy_data(hass):
@@ -235,6 +287,11 @@ class EnchufadoCoordinator:
                     ts in consumptions and consumptions[ts] != value for ts, value in new_consumptions.items()
                 )
                 consumptions.update(new_consumptions)
+
+        try:
+            await EnchufadoCoordinator.update_max_power(hass)
+        except Exception as err:  # never block the import on the max power query
+            _LOGGER.error("Max power update failed: %s", err)
 
         # --- Fetch PVPC prices from REE ---
         first_price_date = None

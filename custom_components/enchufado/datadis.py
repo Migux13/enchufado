@@ -8,6 +8,7 @@ import logging
 
 import aiohttp
 
+from .maxpower import parse_max_power
 from .util import parse_consumption_days
 
 _LOGGER = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 _URL_TOKEN = "https://datadis.es/nikola-auth/tokens/login"
 _URL_SUPPLIES = "https://datadis.es/api-private/api/get-supplies-v2"
 _URL_CONSUMPTION = "https://datadis.es/api-private/api/get-consumption-data-v2"
+_URL_MAX_POWER = "https://datadis.es/api-private/api/get-max-power-v2"
 _URL_CONTRACT = "https://datadis.es/api-private/api/get-contract-detail-v2"
 
 DISTRIBUTOR_CODES = {
@@ -196,3 +198,40 @@ class Datadis:
             len(result), params["startDate"], params["endDate"],
         )
         return result, status
+
+    @staticmethod
+    async def max_power(month: datetime.date) -> tuple:
+        """Maximum demanded power of one closed month (one query to get-max-power-v2).
+
+        Returns (records, status): ``records`` as in maxpower.parse_max_power, ``status``
+        the HTTP status or None when no response was received. Like the consumption
+        query it is never retried: Datadis rejects an identical one for 24 h.
+        """
+        if not all([Datadis.cups, Datadis.distributor_code]):
+            _LOGGER.error("Datadis not configured — call Datadis.setup() first")
+            return [], None
+
+        Datadis._token = None  # fresh login, the query is rare and a 401 would lose the day
+        if not await Datadis._ensure_token():
+            return [], None
+
+        params = {
+            "cups": Datadis.cups,
+            "distributorCode": Datadis.distributor_code,
+            "startDate": month.strftime("%Y/%m"),
+            "endDate": month.strftime("%Y/%m"),
+        }
+        if Datadis.authorized_nif:
+            params["authorizedNif"] = Datadis.authorized_nif
+
+        data, status = await _request(Datadis._token, _URL_MAX_POWER, params)
+        if status == 401:
+            Datadis._token = None
+        if not data:
+            return [], status
+
+        records, errors = parse_max_power(data)
+        if errors:
+            _LOGGER.warning("Datadis max power distributorError: %s", errors)
+        _LOGGER.info("Datadis: %d max power records (%s)", len(records), params["startDate"])
+        return records, status

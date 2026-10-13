@@ -14,7 +14,7 @@ from .coordinator import EnchufadoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.NUMBER]
+PLATFORMS = [Platform.NUMBER, Platform.SENSOR]
 
 
 async def async_setup_entry(hass, entry) -> bool:
