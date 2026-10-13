@@ -34,6 +34,16 @@
         "data_description": {
           "esios_token": "Token personal gratuito, necesario para obtener el precio PVPC. Se solicita por email a ESIOS-REE."
         }
+      },
+      "reauth_confirm": {
+        "title": "Token API ESIOS-REE rechazado",
+        "description": "ESIOS-REE ha rechazado el token guardado (caducado o revocado), por lo que no se pueden descargar los precios PVPC. Introduce un token válido.",
+        "data": {
+          "esios_token": "Token API ESIOS-REE"
+        },
+        "data_description": {
+          "esios_token": "Token personal gratuito, necesario para obtener el precio PVPC. Se solicita por email a ESIOS-REE."
+        }
       }
     },
     "error": {
@@ -44,7 +54,8 @@
     },
     "abort": {
       "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros.",
-      "reconfigure_successful": "Token de ESIOS-REE actualizado. La integración se está recargando."
+      "reconfigure_successful": "Token de ESIOS-REE actualizado. La integración se está recargando.",
+      "reauth_successful": "Token de ESIOS-REE actualizado. La integración se está recargando."
     }
   },
   "issues": {

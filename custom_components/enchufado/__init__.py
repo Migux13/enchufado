@@ -22,6 +22,7 @@ async def async_setup_entry(hass, entry) -> bool:
     # Options (billing cycle day) take precedence over the data given at setup.
     hass_data = {**entry.data, **entry.options}
     EnchufadoCoordinator.set_config(hass_data, hass)
+    EnchufadoCoordinator.config_entry = entry
     _update_token_issue(hass, entry)
 
     await hass.async_add_executor_job(_ensure_data_dir)
