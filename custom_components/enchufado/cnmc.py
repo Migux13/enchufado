@@ -37,6 +37,14 @@ _MSG_NO_DATA = "Aviso: No hay datos para el período de facturación"
 _MSG_BAD_FILE = "Aviso: El formato del fichero de consumo no es el correcto"
 
 _HEADERS = {"Content-Type": "application/json"}
+_TIMEOUT = aiohttp.ClientTimeout(total=60)
+
+
+class CNMCUnavailable(Exception):
+    """The CNMC comparator can't be used right now (HTTP error, HTML page, network).
+
+    Raised so the caller can stop trying the remaining periods and log a single warning.
+    """
 
 
 async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zip_code: str):
@@ -90,7 +98,7 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
     encoded = base64.b64encode(csv_data.encode("utf-8")).decode("utf-8")
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
             # Step 1: upload consumption curve
             energy_file = None
             async with session.post(
@@ -99,6 +107,15 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
                 json={"file": f"data:text/csv;base64,{encoded}"},
             ) as resp:
                 response_text = await resp.text()
+                upload_status = resp.status
+                upload_type = resp.content_type
+
+            if upload_status == 400 and upload_type == "application/problem+json":
+                # The API rejects malformed curves with a JSON problem document.
+                _LOGGER.warning("CNMC: curve rejected for %s: %s", billing_period["start_date"], response_text[:200])
+                return billing_period, csv_data
+            if upload_status != 200 or response_text.lstrip().startswith("<"):
+                raise CNMCUnavailable(f"upload answered HTTP {upload_status} ({upload_type})")
 
             if response_text.startswith(_MSG_OLD_FILE):
                 _LOGGER.info("CNMC: period %s is too old for the API", billing_period["start_date"])
@@ -131,6 +148,8 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
                 end_timestamp=madrid_timestamp(billing_period["end_date"]) * 1000,
             )
             async with session.get(url) as resp:
+                if resp.status != 200 or resp.content_type != "application/json":
+                    raise CNMCUnavailable(f"bill answered HTTP {resp.status} ({resp.content_type})")
                 bill = await resp.json()
 
             _LOGGER.debug("CNMC full response keys: %s", list(bill.keys()) if isinstance(bill, dict) else type(bill))
@@ -153,6 +172,10 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
                 _LOGGER.info("CNMC: bill for %s → %.2f €", billing_period["start_date"], gasto["importeTotal"])
             else:
                 _LOGGER.warning("CNMC: unexpected bill response for %s: %s", billing_period["start_date"], str(bill)[:200])
+    except CNMCUnavailable:
+        raise
+    except (aiohttp.ClientError, TimeoutError) as err:
+        raise CNMCUnavailable(str(err) or type(err).__name__) from err
     except Exception as err:
         _LOGGER.error("CNMC: request failed for %s: %s", billing_period["start_date"], err)
 

@@ -21,7 +21,7 @@ from homeassistant.util.unit_conversion import EnergyConverter
 
 from homeassistant.helpers import entity_registry as er
 
-from .cnmc import calculate_bill
+from .cnmc import CNMCUnavailable, calculate_bill
 from .const import (
     BILLING_PERIODS_FILENAME,
     BILL_STATISTIC_ID,
@@ -49,6 +49,9 @@ from .ree import REE
 from .util import MADRID_TZ, madrid_timestamp
 
 _LOGGER = logging.getLogger(__name__)
+
+# Computed fields of a billing period; dropped to force a recalculation.
+_BILL_FIELDS = ("total_cost", "total_consumption", "power_cost", "energy_cost", "rent_cost", "tax_cost")
 
 
 class EnchufadoCoordinator:
@@ -496,6 +499,13 @@ class EnchufadoCoordinator:
         end_date = datetime.datetime.fromtimestamp(max(consumptions.keys()), MADRID_TZ).date()
         today = datetime.date.today()
 
+        last_day_with_data = {}
+        for ts in consumptions:
+            day = datetime.datetime.fromtimestamp(ts, MADRID_TZ).date()
+            key = (day.year, day.month)
+            if day >= last_day_with_data.get(key, day):
+                last_day_with_data[key] = day
+
         for p in EnchufadoCoordinator.generate_monthly_periods(
             start_date,
             end_date,
@@ -506,15 +516,24 @@ class EnchufadoCoordinator:
                 existing_by_start[p["start_date"]] = p
             else:
                 existing_p = existing_by_start[p["start_date"]]
-                # Current month is incomplete: refresh end_date and force recalculation
-                if p["start_date"].month == today.month and p["start_date"].year == today.year:
-                    existing_p["end_date"] = p["end_date"]
-                    existing_p.pop("total_cost", None)
-                    existing_p.pop("total_consumption", None)
-                    existing_p.pop("power_cost", None)
-                    existing_p.pop("energy_cost", None)
-                    existing_p.pop("rent_cost", None)
-                    existing_p.pop("tax_cost", None)
+                is_current_month = p["start_date"].month == today.month and p["start_date"].year == today.year
+                # Datadis lags ~2 days, so a month is first stored while still incomplete.
+                # Also extend a closed period when there is consumption after its saved
+                # end_date inside the month (this repairs rows saved truncated by earlier
+                # versions too). The new end is the last day WITH data, because
+                # calculate_bill() needs the period to match the first/last consumption day.
+                new_end = last_day_with_data.get((p["start_date"].year, p["start_date"].month), p["end_date"])
+                new_end = min(new_end, p["end_date"])
+                extended = new_end > existing_p["end_date"]
+                if is_current_month or extended:
+                    if extended and not is_current_month:
+                        _LOGGER.info(
+                            "Billing period %s ended early (%s): extending to %s and recalculating",
+                            p["start_date"], existing_p["end_date"], new_end,
+                        )
+                    existing_p["end_date"] = new_end
+                    for field in _BILL_FIELDS:
+                        existing_p.pop(field, None)
 
         result = sorted(existing_by_start.values(), key=lambda p: p["start_date"])
         return result
@@ -577,6 +596,14 @@ class EnchufadoCoordinator:
             if force_update or not has_cost:
                 try:
                     await EnchufadoCoordinator.get_bill(hass, period, consumptions)
+                except CNMCUnavailable as err:
+                    _LOGGER.warning(
+                        "CNMC comparator unavailable (%s): bill simulation skipped, "
+                        "it will be retried on the next import",
+                        err,
+                    )
+                    changed = True
+                    break
                 except Exception as err:
                     _LOGGER.error(
                         "calculate_bills: error processing %s: %s",
@@ -633,11 +660,22 @@ class EnchufadoCoordinator:
             if not isinstance(tc, (int, float)):
                 continue
             cumulative += tc
-            start = datetime.datetime(
-                p["start_date"].year, p["start_date"].month, p["start_date"].day,
-                tzinfo=datetime.UTC,
-            )
+            # Midnight Europe/Madrid (22:00/23:00 UTC), like the other statistics
+            start = datetime.datetime.fromtimestamp(madrid_timestamp(p["start_date"]), datetime.UTC)
             bill_stats.append(StatisticData(start=start, state=tc, sum=cumulative))
 
         if bill_stats:
+            # Versions up to 0.3.1 stored these points at midnight UTC, which would stay
+            # next to the new ones and double-count. The whole series is rebuilt from the
+            # CSV on every run, so clear it once when the legacy alignment is detected.
+            last_bill_stat = await get_instance(hass).async_add_executor_job(
+                get_last_statistics, hass, 1, BILL_STATISTIC_ID, False, set()
+            )
+            if last_bill_stat and last_bill_stat.get(BILL_STATISTIC_ID):
+                last_start = datetime.datetime.fromtimestamp(
+                    last_bill_stat[BILL_STATISTIC_ID][0]["start"], datetime.UTC
+                )
+                if last_start.hour == 0:  # Madrid midnight is never 00:00 UTC
+                    _LOGGER.info("Clearing legacy UTC-aligned %s statistics before rewriting", BILL_STATISTIC_ID)
+                    get_instance(hass).async_clear_statistics([BILL_STATISTIC_ID])
             async_add_external_statistics(hass, EnchufadoCoordinator.bill_metadata, bill_stats)
