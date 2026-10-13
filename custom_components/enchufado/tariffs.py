@@ -93,9 +93,15 @@ _TABLES = {
 }
 
 
-def signature(power_high, power_low, cycle_day=1):
-    """Hash of everything the statistic depends on besides consumption and prices."""
-    payload = json.dumps([_TABLES, power_high, power_low, cycle_day], sort_keys=True, default=str)
+def signature(power_high, power_low, cycle_day=1, power_schedule=None):
+    """Hash of everything the statistic depends on besides consumption and prices.
+
+    ``power_schedule`` is the table of contracted powers by date (see ``powers_on``).
+    """
+    parts = [_TABLES, power_high, power_low, cycle_day]
+    if power_schedule:
+        parts.append([[d.isoformat(), high, low] for d, high, low in power_schedule])
+    payload = json.dumps(parts, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -107,6 +113,24 @@ def rate_on(table, day):
             break
         value = row_value
     return value
+
+
+def powers_on(day, power_high, power_low, power_schedule=None):
+    """(power_high, power_low) in force on ``day``.
+
+    ``power_schedule`` is a list of ``(valid_from, power_high, power_low)`` rows sorted by
+    date, built from the contracts' start dates; a row applies until the next one. Days
+    before the first row use that row's powers, and without a schedule the current
+    ``power_high``/``power_low`` apply to every day.
+    """
+    if not power_schedule:
+        return power_high, power_low
+    chosen = power_schedule[0]
+    for row in power_schedule:
+        if row[0] > day:
+            break
+        chosen = row
+    return chosen[1], chosen[2]
 
 
 def cycle_last_day(day, cycle_day=1):
@@ -170,20 +194,23 @@ def hours_in_day(day):
 
 
 def create_total_cost_series(first_ts, last_ts, consumptions, prices, power_high, power_low,
-                             day_cost=0.0, cycle_day=1):
+                             day_cost=0.0, cycle_day=1, power_schedule=None):
     """Hourly (timestamp, hour_cost, day_to_date_cost) rows for first_ts..last_ts.
 
     ``consumptions`` maps timestamp -> {"value": kWh}; missing hours count as 0 kWh (the
     fixed terms are still charged), missing prices as 0. Hours before TABLES_START are
     skipped. ``day_cost`` seeds the day-to-date state when resuming in the middle of a day.
     IVA and IEE use the rates in force on the last day of the billing cycle (starting on
-    ``cycle_day``) that contains the hour, as they accrue on the invoice date.
+    ``cycle_day``) that contains the hour, as they accrue on the invoice date. Each day
+    uses the contracted power in force that day (``power_schedule``), so a later power
+    change does not alter the hours already computed.
     """
     rows = []
     timestamp = first_ts
     cache_day = None
     n_hours = 24
     tax_day = None
+    day_high, day_low = power_high, power_low
     while timestamp <= last_ts:
         local = datetime.datetime.fromtimestamp(timestamp, MADRID_TZ)
         day = local.date()
@@ -192,9 +219,10 @@ def create_total_cost_series(first_ts, last_ts, consumptions, prices, power_high
                 cache_day = day
                 n_hours = hours_in_day(day)
                 tax_day = cycle_last_day(day, cycle_day)
+                day_high, day_low = powers_on(day, power_high, power_low, power_schedule)
             c = consumptions.get(timestamp)
             energy = (c["value"] if c else 0.0) * prices.get(timestamp, 0.0)
-            cost = hour_cost(day, n_hours, energy, power_high, power_low, tax_day)["total"]
+            cost = hour_cost(day, n_hours, energy, day_high, day_low, tax_day)["total"]
             day_cost = cost if local.hour == 0 else day_cost + cost
             rows.append((timestamp, cost, day_cost))
         timestamp += 3600

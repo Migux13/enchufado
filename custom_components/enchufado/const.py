@@ -37,3 +37,8 @@ BILLING_PERIODS_FILENAME = "billing_periods.csv"
 TOTAL_COST_SIGNATURE_FILENAME = "total_cost_signature.txt"
 # Log of Datadis consumption queries sent (range + time), see quota.py
 DATADIS_QUERIES_FILENAME = "datadis_queries.json"
+# Maximum demanded power history (get-max-power-v2), see maxpower.py
+MAX_POWER_FILENAME = "max_power.json"
+SIGNAL_MAX_POWER = f"{DOMAIN}_max_power_updated"
+# Contracted power by date, from get-contract-detail-v2 (see contracts.py)
+POWER_SCHEDULE_FILENAME = "power_schedule.json"

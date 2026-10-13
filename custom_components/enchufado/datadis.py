@@ -8,6 +8,7 @@ import logging
 
 import aiohttp
 
+from .maxpower import parse_max_power
 from .util import parse_consumption_days
 
 _LOGGER = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 _URL_TOKEN = "https://datadis.es/nikola-auth/tokens/login"
 _URL_SUPPLIES = "https://datadis.es/api-private/api/get-supplies-v2"
 _URL_CONSUMPTION = "https://datadis.es/api-private/api/get-consumption-data-v2"
+_URL_MAX_POWER = "https://datadis.es/api-private/api/get-max-power-v2"
 _URL_CONTRACT = "https://datadis.es/api-private/api/get-contract-detail-v2"
 
 DISTRIBUTOR_CODES = {
@@ -88,13 +90,13 @@ async def async_get_supplies(token: str, authorized_nif: str | None = None) -> l
     return supplies
 
 
-async def async_get_contract_detail(
+async def async_get_contracts(
     token: str,
     cups: str,
     distributor_code: str,
     authorized_nif: str | None = None,
-) -> dict | None:
-    """Return the most recent active contract for the given CUPS, or None."""
+) -> list | None:
+    """Return every contract in the get-contract-detail-v2 response, or None on failure."""
     params = {"cups": cups, "distributorCode": distributor_code}
     if authorized_nif:
         params["authorizedNif"] = authorized_nif
@@ -102,8 +104,20 @@ async def async_get_contract_detail(
     data, _ = await _request(token, _URL_CONTRACT, params)
     if not data:
         return None
-
+    if isinstance(data, dict) and data.get("distributorError"):
+        _LOGGER.warning("Datadis contract distributorError: %s", data["distributorError"])
     items = data.get("contract", data) if isinstance(data, dict) else data
+    return items if isinstance(items, list) else None
+
+
+async def async_get_contract_detail(
+    token: str,
+    cups: str,
+    distributor_code: str,
+    authorized_nif: str | None = None,
+) -> dict | None:
+    """Return the most recent active contract for the given CUPS, or None."""
+    items = await async_get_contracts(token, cups, distributor_code, authorized_nif)
     if not items:
         return None
 
@@ -196,3 +210,54 @@ class Datadis:
             len(result), params["startDate"], params["endDate"],
         )
         return result, status
+
+    @staticmethod
+    async def max_power(first_month: datetime.date, last_month: datetime.date | None = None) -> tuple:
+        """Maximum demanded power of closed months (one query to get-max-power-v2).
+
+        Returns (records, status): ``records`` as in maxpower.parse_max_power, ``status``
+        the HTTP status or None when no response was received. Like the consumption
+        query it is never retried: Datadis rejects an identical one for 24 h.
+        """
+        if not all([Datadis.cups, Datadis.distributor_code]):
+            _LOGGER.error("Datadis not configured — call Datadis.setup() first")
+            return [], None
+
+        Datadis._token = None  # fresh login, the query is rare and a 401 would lose the day
+        if not await Datadis._ensure_token():
+            return [], None
+
+        params = {
+            "cups": Datadis.cups,
+            "distributorCode": Datadis.distributor_code,
+            "startDate": first_month.strftime("%Y/%m"),
+            "endDate": (last_month or first_month).strftime("%Y/%m"),
+        }
+        if Datadis.authorized_nif:
+            params["authorizedNif"] = Datadis.authorized_nif
+
+        data, status = await _request(Datadis._token, _URL_MAX_POWER, params)
+        if status == 401:
+            Datadis._token = None
+        if not data:
+            return [], status
+
+        records, errors = parse_max_power(data)
+        if errors:
+            _LOGGER.warning("Datadis max power distributorError: %s", errors)
+        _LOGGER.info(
+            "Datadis: %d max power records (%s → %s)", len(records), params["startDate"], params["endDate"]
+        )
+        return records, status
+
+    @staticmethod
+    async def contracts() -> list | None:
+        """Every contract of the supply (get-contract-detail-v2, no 24 h rule), or None."""
+        if not all([Datadis.cups, Datadis.distributor_code]):
+            return None
+        Datadis._token = None  # fresh login: this runs once a day
+        if not await Datadis._ensure_token():
+            return None
+        return await async_get_contracts(
+            Datadis._token, Datadis.cups, Datadis.distributor_code, Datadis.authorized_nif
+        )
