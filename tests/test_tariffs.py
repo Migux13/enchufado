@@ -113,14 +113,15 @@ def test_signature_changes_with_power():
 @pytest.mark.parametrize(
     "day,cycle_day,last",
     [
-        (D(2026, 3, 5), 5, D(2026, 4, 4)),
-        (D(2026, 3, 4), 5, D(2026, 3, 4)),
-        (D(2026, 12, 20), 5, D(2027, 1, 4)),
-        (D(2026, 5, 17), 1, D(2026, 5, 31)),
-        (D(2026, 2, 28), 28, D(2026, 3, 27)),
+        (D(2026, 3, 5), 5, D(2026, 4, 10)),
+        (D(2026, 3, 4), 5, D(2026, 3, 10)),
+        (D(2026, 12, 20), 5, D(2027, 1, 10)),
+        (D(2026, 5, 17), 1, D(2026, 6, 6)),
+        (D(2026, 2, 28), 28, D(2026, 4, 2)),
     ],
 )
-def test_cycle_last_day(day, cycle_day, last):
+def test_cycle_last_day_adds_the_invoice_delay(day, cycle_day, last):
+    assert tariffs.INVOICE_DELAY_DAYS == 6
     assert tariffs.cycle_last_day(day, cycle_day) == last
 
 
@@ -158,11 +159,13 @@ def test_cycle_taxes_apply_to_the_whole_invoice(first, last, expected):
         day += datetime.timedelta(days=1)
 
 
-def test_calendar_month_cycle_uses_the_rates_of_the_month_end():
-    # cycle_day=1: a calendar month is taxed at the rates in force on its last day
+def test_calendar_month_invoiced_after_the_rate_change_pays_the_new_rate():
+    # May 1-31 is invoiced in early June, already at 21 % / 5,11 % (the cut ended on 31/05)
+    assert _tax_rates(D(2026, 5, 15), 1) == (0.0511269632, 0.21)
+    assert _tax_rates(D(2026, 5, 31), 1) == (0.0511269632, 0.21)
+    # April is invoiced in early May, still at the reduced rates
+    assert _tax_rates(D(2026, 4, 30), 1) == (0.005, 0.10)
     assert _tax_rates(D(2026, 3, 10), 1) == (0.005, 0.10)
-    assert _tax_rates(D(2026, 5, 31), 1) == (0.005, 0.10)
-    assert _tax_rates(D(2026, 6, 1), 1) == (0.0511269632, 0.21)
 
 
 def test_signature_changes_with_cycle_day():

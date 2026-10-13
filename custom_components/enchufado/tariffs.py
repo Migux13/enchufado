@@ -22,6 +22,11 @@ DAYS_PER_YEAR = 365  # the CNMC comparator and invoices prorate with 365, also i
 
 TABLES_START = D(2026, 1, 1)
 
+# Days between the last day of a billing cycle and the invoice date, when IVA/IEE accrue.
+# Approximation: invoices observed in 2026 were issued 4-6 days after the cycle end; the
+# real delay varies from invoice to invoice, 6 is the upper end of what was observed.
+INVOICE_DELAY_DAYS = 6
+
 # Peaje de transporte y distribución + cargos, tariff 2.0TD, EUR/kW·year.
 # Source: values printed by the CNMC comparator (13/10/2026) and on 2026 invoices.
 # Legal basis (not re-checked line by line): CNMC peajes 2026 resolution and Orden TED/1524/2025
@@ -83,6 +88,7 @@ _TABLES = {
     "vat_std": VAT_STANDARD,
     "vat_max_kw": VAT_REDUCED_MAX_KW,
     "days_per_year": DAYS_PER_YEAR,
+    "invoice_delay": INVOICE_DELAY_DAYS,
     "start": TABLES_START.isoformat(),
 }
 
@@ -104,15 +110,19 @@ def rate_on(table, day):
 
 
 def cycle_last_day(day, cycle_day=1):
-    """Last day of the billing cycle containing ``day``.
+    """Date on which IVA and IEE accrue for the billing cycle containing ``day``.
 
-    Cycles start on ``cycle_day`` (1-28) of every month; 1 means calendar months.
+    Cycles start on ``cycle_day`` (1-28) of every month; 1 means calendar months. The
+    taxes accrue on the invoice date, which arrives INVOICE_DELAY_DAYS after the last day
+    of the cycle (approximation), so a cycle ending on 31/05 is taxed with the rates of
+    06/06. The name is kept: it is the cycle's last day plus that constant margin.
     """
     if day.day >= cycle_day:
         year, month = (day.year + 1, 1) if day.month == 12 else (day.year, day.month + 1)
     else:
         year, month = day.year, day.month
-    return D(year, month, cycle_day) - datetime.timedelta(days=1)
+    last = D(year, month, cycle_day) - datetime.timedelta(days=1)
+    return last + datetime.timedelta(days=INVOICE_DELAY_DAYS)
 
 
 def vat_on(day, power_high, power_low):
