@@ -8,7 +8,7 @@ import logging
 
 import aiohttp
 
-from .util import madrid_timestamp
+from .util import parse_consumption_days
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,25 +148,29 @@ class Datadis:
         return False
 
     @staticmethod
-    async def consumptions(start_date: datetime.date, end_date: datetime.date) -> dict:
-        """Fetch hourly consumption from Datadis for the given date range.
+    async def consumptions(first_month: datetime.date, last_month: datetime.date) -> tuple:
+        """Send ONE consumption query for the months first_month..last_month (hourly data).
 
-        Returns {unix_timestamp: {'value': kwh, 'reading_type': 'R'|'E'}}
-        Compatible with pvpc_energy coordinator interface.
-        Timestamps are local (Madrid) Unix epoch.
+        Returns (records, status): ``records`` maps unix_timestamp (Madrid local) to
+        {'value': kwh, 'reading_type': 'R'|'E'} for every complete day in the response
+        (see parse_consumption_days), ``status`` is the HTTP status, or None if no
+        response was received (the query is then not considered sent).
+
+        Never retried: Datadis answers 429 to an identical query for 24 h, so a failure
+        (429 included) is logged and the caller waits for the next daily run.
         """
         if not all([Datadis.cups, Datadis.distributor_code, Datadis.point_type]):
             _LOGGER.error("Datadis not configured — call Datadis.setup() first")
-            return {}
+            return {}, None
 
         if not await Datadis._ensure_token():
-            return {}
+            return {}, None
 
         params = {
             "cups": Datadis.cups,
             "distributorCode": Datadis.distributor_code,
-            "startDate": start_date.strftime("%Y/%m"),
-            "endDate": end_date.strftime("%Y/%m"),
+            "startDate": first_month.strftime("%Y/%m"),
+            "endDate": last_month.strftime("%Y/%m"),
             "measurementType": "0",  # 0 = hourly
             "pointType": str(Datadis.point_type),
         }
@@ -174,36 +178,18 @@ class Datadis:
             params["authorizedNif"] = Datadis.authorized_nif
 
         data, status = await _request(Datadis._token, _URL_CONSUMPTION, params)
-
-        # On 401 the token may have expired — refresh once (not on 429 rate-limit)
-        if data is None and status == 401:
-            Datadis._token = None
-            if not await Datadis._ensure_token():
-                return {}
-            data, _ = await _request(Datadis._token, _URL_CONSUMPTION, params)
-
+        if status == 401:
+            Datadis._token = None  # next run logs in again
+        if status == 429:
+            _LOGGER.warning("Datadis consumption query %s→%s rejected (429); waiting for tomorrow",
+                            params["startDate"], params["endDate"])
         if not data:
-            return {}
+            return {}, status
 
         records = data if isinstance(data, list) else data.get("timeCurve", [])
-        result = {}
-        for item in records:
-            try:
-                raw_hour = int(item["time"].split(":")[0]) - 1  # "01:00" → hour 0
-                dt = datetime.datetime.strptime(
-                    f"{item['date']} {str(raw_hour).zfill(2)}:00", "%Y/%m/%d %H:%M"
-                )
-                if not (start_date <= dt.date() <= end_date):
-                    continue
-                ts = madrid_timestamp(dt)
-                result[ts] = {
-                    "value": float(item["consumptionKWh"]),
-                    "reading_type": "R" if item.get("obtainMethod") == "Real" else "E",
-                }
-            except (KeyError, ValueError, TypeError) as err:
-                _LOGGER.debug("Skipping consumption record %s: %s", item, err)
-
+        result = parse_consumption_days(records)
         _LOGGER.info(
-            "Datadis: fetched %d consumption records (%s → %s)", len(result), start_date, end_date
+            "Datadis: %d hourly records in complete days (query %s → %s)",
+            len(result), params["startDate"], params["endDate"],
         )
-        return result
+        return result, status

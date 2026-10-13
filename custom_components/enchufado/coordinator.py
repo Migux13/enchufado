@@ -3,6 +3,7 @@
 Statistics handling and data persistence derived from pvpc_energy by yinyang17
 (https://github.com/yinyang17/pvpc_energy), used under MIT licence.
 """
+import asyncio
 import datetime
 import logging
 from functools import partial
@@ -38,6 +39,7 @@ from .const import (
     CONF_POWER_LOW,
     CONF_ZIP_CODE,
     DEFAULT_BILLING_CYCLE_DAY,
+    DATADIS_QUERIES_FILENAME,
     CONSUMPTION_STATISTIC_ID,
     CONSUMPTION_STATISTIC_NAME,
     COST_STATISTIC_ID,
@@ -51,6 +53,7 @@ from .const import (
 )
 from . import tariffs
 from .datadis import Datadis
+from . import quota
 from .ree import REE, ESIOSAuthError
 from .util import MADRID_TZ, madrid_timestamp
 
@@ -61,6 +64,8 @@ _BILL_FIELDS = ("total_cost", "total_consumption", "power_cost", "energy_cost", 
 
 
 class EnchufadoCoordinator:
+    # serialises the plan -> send -> record sequence of Datadis consumption queries
+    _datadis_lock = asyncio.Lock()
     datadis_user = None
     datadis_password = None
     cups = None
@@ -75,6 +80,7 @@ class EnchufadoCoordinator:
     energy_file = None
     billing_periods_file = None
     total_cost_signature_file = None
+    datadis_queries_file = None
 
     consumption_metadata = StatisticMetaData(
         name=CONSUMPTION_STATISTIC_NAME,
@@ -140,6 +146,9 @@ class EnchufadoCoordinator:
 
         EnchufadoCoordinator.user_files_path = hass.config.path(DOMAIN)
         EnchufadoCoordinator.energy_file = f"{EnchufadoCoordinator.user_files_path}/{ENERGY_FILENAME}"
+        EnchufadoCoordinator.datadis_queries_file = (
+            f"{EnchufadoCoordinator.user_files_path}/{DATADIS_QUERIES_FILENAME}"
+        )
         EnchufadoCoordinator.billing_periods_file = (
             f"{EnchufadoCoordinator.user_files_path}/{BILLING_PERIODS_FILENAME}"
         )
@@ -182,7 +191,8 @@ class EnchufadoCoordinator:
             start_date = datetime.date(_today.year - 1, 1, 1)
         else:
             start_date = datetime.date(_today.year - 2, _today.month + 1, 1)
-        end_date = datetime.date.today() - datetime.timedelta(days=2)
+        # Datadis already publishes D+1 and the day-ahead PVPC prices are out by the evening
+        end_date = datetime.date.today() + datetime.timedelta(days=1)
 
         consumptions, prices = await EnchufadoCoordinator.load_energy_data(
             hass, EnchufadoCoordinator.energy_file, start_date
@@ -197,19 +207,32 @@ class EnchufadoCoordinator:
             first_consumption_date = datetime.datetime.fromtimestamp(min(consumptions.keys()), MADRID_TZ).date()
             last_consumption_date = datetime.datetime.fromtimestamp(max(consumptions.keys()), MADRID_TZ).date()
 
-        # --- Fetch consumption from Datadis ---
-        datadis_start = start_date
-        if not force_update and last_consumption_date and last_consumption_date >= start_date:
-            if end_date <= last_consumption_date:
-                datadis_start = None  # Already up to date
+        # --- Fetch consumption from Datadis: at most one query a day (see quota.py) ---
+        consumption_corrected = False
+        async with EnchufadoCoordinator._datadis_lock:
+            now = datetime.datetime.now(MADRID_TZ)
+            queries = quota.load(
+                await hass.async_add_executor_job(EnchufadoCoordinator._read_text, EnchufadoCoordinator.datadis_queries_file)
+            )
+            query = quota.plan_query(
+                now.date(), queries, now, last_consumption_date, start_date, force_update
+            )
+            if query is None:
+                _LOGGER.info("No Datadis consumption query due now (one per day, none repeated within 24 h)")
             else:
-                datadis_start = last_consumption_date + datetime.timedelta(days=1)
-
-        if force_update or datadis_start is not None:
-            fetch_from = start_date if force_update else (datadis_start or start_date)
-            _LOGGER.info("Fetching Datadis consumption: %s → %s", fetch_from, end_date)
-            new_consumptions = await Datadis.consumptions(fetch_from, end_date)
-            if new_consumptions:
+                _LOGGER.info("Datadis consumption query: %s → %s", query[0], query[1])
+                new_consumptions, status = await Datadis.consumptions(*query)
+                if status is not None:  # a response came back, so Datadis counted the query
+                    queries = quota.record(queries, query, now)
+                    await hass.async_add_executor_job(
+                        EnchufadoCoordinator._write_text,
+                        EnchufadoCoordinator.datadis_queries_file,
+                        quota.dump(queries),
+                    )
+                # Keep every complete day returned; days that changed (estimated -> real) are overwritten
+                consumption_corrected = any(
+                    ts in consumptions and consumptions[ts] != value for ts, value in new_consumptions.items()
+                )
                 consumptions.update(new_consumptions)
 
         # --- Fetch PVPC prices from REE ---
@@ -235,7 +258,12 @@ class EnchufadoCoordinator:
                     EnchufadoCoordinator.config_entry.async_start_reauth(hass)
 
         # --- Save and update statistics if data changed ---
-        if force_update or len(consumptions) > consumptions_len or len(prices) > prices_len:
+        if (
+            force_update
+            or consumption_corrected
+            or len(consumptions) > consumptions_len
+            or len(prices) > prices_len
+        ):
             await EnchufadoCoordinator.save_energy_data(
                 hass, EnchufadoCoordinator.energy_file, consumptions, prices
             )
@@ -260,6 +288,7 @@ class EnchufadoCoordinator:
                         _LOGGER.info("New prices for hours already in the cost statistic: rebuilding it")
                 if (
                     force_update
+                    or consumption_corrected
                     or backfilled_prices
                     or not last_stat
                     or first_consumption_date is None

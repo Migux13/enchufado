@@ -35,3 +35,5 @@ ENERGY_FILENAME = "energy_data.csv"
 BILLING_PERIODS_FILENAME = "billing_periods.csv"
 # Hash of the regulated-values table + contracted power used for enchufado:total_cost
 TOTAL_COST_SIGNATURE_FILENAME = "total_cost_signature.txt"
+# Log of Datadis consumption queries sent (range + time), see quota.py
+DATADIS_QUERIES_FILENAME = "datadis_queries.json"
