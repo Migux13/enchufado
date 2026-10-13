@@ -71,7 +71,21 @@ No hace falta borrar la integración:
 Ve a **Ajustes → Panel de energía** y añade:
 
 - `enchufado:consumption` — Consumo en kWh
-- `enchufado:cost` — Coste en €
+- `enchufado:cost` — Coste de la **energía** en € (consumo × precio PVPC)
+- `enchufado:total_cost` — **Coste eléctrico total** en €: energía + potencia + financiación del bono social + alquiler del contador + impuesto eléctrico + IVA
+
+### Coste total en el panel de Energía
+
+`enchufado:cost` solo incluye la energía. Para ver en el panel lo que realmente pagas, ve a **Ajustes → Paneles → Energía → Red eléctrica → tu consumo de red → Usar una estadística** y elige `enchufado:total_cost` en lugar de `enchufado:cost`.
+
+Cómo se calcula cada hora:
+
+- **Energía**: consumo × precio PVPC de esa hora.
+- **Potencia**: `potencia P1 × (peaje y cargo P1 + margen de comercialización) + potencia P2 × (peaje y cargo P2)`, en €/kW·año ÷ 365, repartido entre las horas del día (23/24/25 en los cambios de hora).
+- **Bono social** y **alquiler del contador**: €/día repartidos entre las horas del día.
+- **Impuesto eléctrico** = tipo × (energía + potencia + bono social). **IVA** = tipo × (esa base + impuesto eléctrico + contador).
+
+Los valores regulados (peajes, cargos, bono social, contador, tipos de impuestos) están en `custom_components/enchufado/tariffs.py` en tablas con fecha de inicio de vigencia, con la fuente de cada valor en los comentarios. Cada hora usa el valor vigente ese día; actualizar un año es añadir filas. Cuando cambia la tabla o la potencia contratada, la estadística se regenera entera. Solo hay datos desde el 1 de enero de 2026. El IVA y el impuesto eléctrico se devengan en la fecha de la factura, no por día de consumo (art. 75.Uno.7 de la Ley 37/1992), así que cada hora usa los tipos vigentes en la fecha de la factura de su ciclo, que se aproxima como el último día del ciclo más 6 días (en las facturas observadas llegó 4-6 días después del fin del ciclo; el retraso real varía). Indica el **día de inicio del ciclo** (1-28, por defecto 1 = mes natural) al configurar la integración o después en Configurar; Datadis no publica este dato. El ciclo real sigue la fecha de lectura del contador y puede variar ±3 días de un mes a otro, por lo que el día configurado es una aproximación. El mínimo legal del impuesto eléctrico no se aplica hora a hora.
 
 ## Simulación de facturas
 

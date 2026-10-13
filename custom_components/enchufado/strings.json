@@ -18,7 +18,11 @@
         "title": "Selecciona tu suministro",
         "description": "Se han encontrado los siguientes puntos de suministro en tu cuenta.",
         "data": {
-          "cups": "CUPS"
+          "cups": "CUPS",
+          "billing_cycle_day": "Día de inicio del ciclo de facturación"
+        },
+        "data_description": {
+          "billing_cycle_day": "Día del mes (1-28) en que empieza tu periodo de facturación; 1 = mes natural. Se usa para aplicar el IVA y el impuesto eléctrico de la fecha de la factura. Mira las fechas de tus facturas; se puede cambiar después en Configurar."
         }
       },
       "reconfigure": {
@@ -62,6 +66,20 @@
         },
         "abort": {
           "entry_not_found": "No se encontró la entrada de configuración de Enchufado."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ciclo de facturación",
+        "description": "Los tipos de IVA e impuesto eléctrico se aplican según la fecha de la factura. Indica el día en que suele empezar tu periodo de facturación.",
+        "data": {
+          "billing_cycle_day": "Día de inicio del ciclo de facturación"
+        },
+        "data_description": {
+          "billing_cycle_day": "1-28; 1 = mes natural. Datadis no publica este dato. Al cambiarlo se recalcula la estadística de coste total."
         }
       }
     }
